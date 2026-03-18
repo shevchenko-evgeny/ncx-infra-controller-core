@@ -2169,11 +2169,11 @@ message BatchInstanceAllocationResponse {
   repeated Instance instances = 1;
 }
 
-// OS scope enum (for hybrid architecture support)
+// OS scope enum
 enum OsScope {
-  OS_SCOPE_UNSPECIFIED = 0;
-  OS_SCOPE_GLOBAL = 1;  // Cloud-managed, synced to sites (read-only at sites)
-  OS_SCOPE_LOCAL = 2;   // Site-managed, editable locally
+  OS_SCOPE_LOCAL = 0;   // Single local site only, sync both ways
+  OS_SCOPE_LIMITED = 1; // Multi-sites (fix list), rest overrides core during sync
+  OS_SCOPE_GLOBAL = 2;  // Multi-sites (any), rest overrides core during sync
 }
 
 // Parameter for iPXE template substitution or kernel command line
@@ -2206,6 +2206,7 @@ message IpxeOsArtifact {
 
 // Template-based iPXE OS definition (NEW variant for OperatingSystem)
 // This is the recommended approach for defining iPXE-based OS
+// Ultimately it should replace current Operating System.
 message IpxeOsDefinition {
   // Basic info
   optional common.UUID id = 1;

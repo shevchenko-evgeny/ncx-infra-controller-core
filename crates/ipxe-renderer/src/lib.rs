@@ -30,9 +30,9 @@ pub struct IpxeOs {
 /// OS scope enum
 #[derive(Debug, Clone, PartialEq)]
 pub enum OsScope {
-    Unspecified,
-    Global, // Cloud-managed, synced to sites
-    Local,  // Site-managed, editable locally
+    Local,   // Single local site only, sync both ways (default)
+    Limited, // Multi-sites (fix list), rest overrides core during sync
+    Global,  // Multi-sites (any), rest overrides core during sync
 }
 
 /// Parameter for iPXE template substitution
