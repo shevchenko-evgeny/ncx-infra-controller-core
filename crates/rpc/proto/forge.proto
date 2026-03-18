@@ -511,6 +511,10 @@ service Forge {
   rpc GetOsImage(common.UUID) returns (OsImage);
   rpc UpdateOsImage(OsImageAttributes) returns (OsImage);
 
+  // iPXE Script Template management
+  rpc GetIpxeScriptTemplate(GetIpxeScriptTemplateRequest) returns (IpxeScriptTemplate);
+  rpc ListIpxeScriptTemplates(ListIpxeScriptTemplatesRequest) returns (ListIpxeScriptTemplatesResponse);
+
   rpc RebootCompleted(MachineRebootCompletedRequest) returns (MachineRebootCompletedResponse);
 
   // Validation result Persist
@@ -831,6 +835,14 @@ service Forge {
   rpc UpdateComponentFirmware(UpdateComponentFirmwareRequest) returns (UpdateComponentFirmwareResponse);
   rpc GetComponentFirmwareStatus(GetComponentFirmwareStatusRequest) returns (GetComponentFirmwareStatusResponse);
   rpc ListComponentFirmwareVersions(ListComponentFirmwareVersionsRequest) returns (ListComponentFirmwareVersionsResponse);
+
+  // Operating System library
+  rpc CreateOperatingSystem(CreateOperatingSystemRequest) returns (OperatingSystemDefinition);
+  rpc GetOperatingSystem(common.UUID) returns (OperatingSystemDefinition);
+  rpc UpdateOperatingSystem(UpdateOperatingSystemRequest) returns (OperatingSystemDefinition);
+  rpc DeleteOperatingSystem(DeleteOperatingSystemRequest) returns (DeleteOperatingSystemResponse);
+  rpc FindOperatingSystemIds(OperatingSystemSearchFilter) returns (OperatingSystemIdList);
+  rpc FindOperatingSystemsByIds(OperatingSystemsByIdsRequest) returns (OperatingSystemList);
 }
 
 message AttestationIdsRequest {
@@ -2157,6 +2169,87 @@ message BatchInstanceAllocationResponse {
   repeated Instance instances = 1;
 }
 
+// OS scope enum (for hybrid architecture support)
+enum OsScope {
+  OS_SCOPE_UNSPECIFIED = 0;
+  OS_SCOPE_GLOBAL = 1;  // Cloud-managed, synced to sites (read-only at sites)
+  OS_SCOPE_LOCAL = 2;   // Site-managed, editable locally
+}
+
+// Parameter for iPXE template substitution or kernel command line
+// Can be used to replace variables in iPXE templates or add parameters to kernel command line
+// Some are "well known" like 'console', others can be custom defined by users
+message IpxeOsParameter {
+  string name = 1;   // Name of the parameter (used as variable in template)
+  string value = 2;  // Value of the parameter
+}
+
+// Artifact cache strategy
+enum ArtifactCacheStrategy {
+  CACHE_AS_NEEDED = 0;   // Download and cache artifact locally if possible
+  LOCAL_ONLY = 1;        // Artifact URL provided is only usable locally: site specific, no caching applicable.
+  CACHED_ONLY = 2;       // Artifact URL must be cached locally or is unusable
+  REMOTE_ONLY = 3;       // Always fetch from remote URL, never cache locally
+}
+
+// Remote artifact to be cached locally before booting
+// Examples: kernel, initrd, rootfs, qcow-imager.efi, OS image, ...
+message IpxeOsArtifact {
+  string name = 1;                          // Name of the artifact (can be used as variable in template)
+  string url = 2;                           // Original URL for the artifact
+  optional string sha = 3;                  // Optional SHA256 checksum for the artifact
+  optional string auth_type = 4;            // Auth type: "None", "Basic", "Bearer"
+  optional string auth_token = 5;           // Optional auth token for the artifact
+  ArtifactCacheStrategy cache_strategy = 6; // How to handle caching for this artifact
+  optional string local_url = 7;            // Local cached URL, set by carbide-core on successful download. If present overrides 'url' at boot time.
+}
+
+// Template-based iPXE OS definition (NEW variant for OperatingSystem)
+// This is the recommended approach for defining iPXE-based OS
+message IpxeOsDefinition {
+  // Basic info
+  optional common.UUID id = 1;
+  string name = 2;
+  optional string description = 3;
+  string hash = 4;  // hash of the definition for change detection
+
+  // Relationships
+//  optional common.UUID infrastructure_provider_id = 5;
+  optional string tenant_id = 6; // org name for tenant
+
+  // Scope
+  optional OsScope scope = 8;  // Global or Local, unused until DB sync is needed
+
+  // Core iPXE OS definition
+  string ipxe_template_name = 9;                    // Name of iPXE script template (carbide-core has the list)
+  repeated IpxeOsParameter parameters = 10;         // Parameters to replace in template or add to kernel command line
+  repeated IpxeOsArtifact artifacts = 11;           // Artifacts to be downloaded (remote or local/cached)
+
+  bool allow_override = 13;
+
+  // Timestamps
+  string created = 17;
+  string updated = 18;
+  common.UUID created_by = 19;
+}
+
+// Scope for iPXE script templates.
+enum IpxeScriptTemplateScope {
+  INTERNAL = 0;  // Carbide-core usage only
+  PUBLIC = 1;    // Usable by tenant
+}
+
+// Template management messages
+message IpxeScriptTemplate {
+  string name = 1;
+  string template = 2;
+  repeated string required_params = 3;  // Error if these params are not provided or empty
+  string description = 4;
+  repeated string reserved_params = 5;  // Reserved for carbide-core to provide at render time
+  repeated string required_artifacts = 6;  // Error if these artifacts are not provided or empty
+  IpxeScriptTemplateScope scope = 7;  // INTERNAL = carbide-core only, PUBLIC = tenant-usable
+}
+
 // Tenant related configuration that is set once the instance is allocated
 // by a tenant
 message TenantConfig {
@@ -2179,6 +2272,10 @@ message OperatingSystem {
   oneof variant {
     InlineIpxe ipxe = 1;
     common.UUID os_image_id = 2;
+    IpxeOsDefinition ipxe_os_def = 3;
+    // Reference any operating system definition by ID (any variant except OS image).
+    // On read the actual variant (iPXE / ipxe_os_definition) is resolved from the row.
+    common.UUID operating_system_id = 4;
   }
 
   // If this flag is set to `true` the instance will not transition to a Ready state until
@@ -4714,6 +4811,19 @@ message DeleteOsImageRequest {
 message DeleteOsImageResponse {
 }
 
+// Request/Response messages for iPXE Script Template management
+message GetIpxeScriptTemplateRequest {
+  string name = 1;  // Template name
+}
+
+message ListIpxeScriptTemplatesRequest {
+  // Empty for now
+}
+
+message ListIpxeScriptTemplatesResponse {
+  repeated IpxeScriptTemplate templates = 1;
+}
+
 
 message ExpectedHostNic {
   string mac_address = 1;
@@ -7041,4 +7151,86 @@ message DeviceFirmwareVersions {
 
 message ListComponentFirmwareVersionsResponse {
   repeated DeviceFirmwareVersions devices = 1;
+}
+
+// --- Operating System library messages ---
+
+// Operating system definition (CRUD resource, table operating_systems).
+message OperatingSystemDefinition {
+  string id = 1;
+  string name = 2;
+  optional string description = 3;
+  string org = 4;
+  string type = 5;
+  TenantState status = 6; // we only use some states from TenantState
+  bool is_active = 7;
+  bool allow_override = 8;
+  bool phone_home_enabled = 9;
+  optional string user_data = 10;
+  string created = 11;
+  string updated = 12;
+
+  // Variant: ipxe
+  optional string ipxe_script = 20;
+  // Variant: ipxe_os_definition
+  optional string ipxe_template_name = 22;
+  repeated IpxeOsParameter ipxe_parameters = 23;
+  repeated IpxeOsArtifact ipxe_artifacts = 24;
+  optional string ipxe_definition_hash = 25;
+}
+
+message CreateOperatingSystemRequest {
+  string name = 1;
+  optional string description = 2;
+  string org = 3;
+  bool is_active = 4;
+  bool allow_override = 5;
+  bool phone_home_enabled = 6;
+  optional string user_data = 7;
+  optional common.UUID id = 8;
+
+  // Exactly one variant must be provided to determine the type.
+  // ipxe: set ipxe_script
+  // ipxe_os_definition: set ipxe_template_name (and optionally parameters/artifacts)
+  optional string ipxe_script = 20;
+  optional string ipxe_template_name = 22;
+  repeated IpxeOsParameter ipxe_parameters = 23;
+  repeated IpxeOsArtifact ipxe_artifacts = 24;
+}
+
+message UpdateOperatingSystemRequest {
+  common.UUID id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional bool is_active = 4;
+  optional bool allow_override = 5;
+  optional bool phone_home_enabled = 6;
+  optional string user_data = 7;
+
+  optional string ipxe_script = 20;
+  optional string ipxe_template_name = 22;
+  repeated IpxeOsParameter ipxe_parameters = 23;
+  repeated IpxeOsArtifact ipxe_artifacts = 24;
+}
+
+message DeleteOperatingSystemRequest {
+  common.UUID id = 1;
+}
+
+message DeleteOperatingSystemResponse {}
+
+message OperatingSystemSearchFilter {
+  optional string org = 1;
+}
+
+message OperatingSystemIdList {
+  repeated common.UUID ids = 1;
+}
+
+message OperatingSystemsByIdsRequest {
+  repeated common.UUID ids = 1;
+}
+
+message OperatingSystemList {
+  repeated OperatingSystemDefinition operating_systems = 1;
 }
