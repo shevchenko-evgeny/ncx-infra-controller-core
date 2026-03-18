@@ -530,12 +530,20 @@ pub async fn update_reboot_time(
     machine: &Machine,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET last_reboot_time=NOW() WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_reboot_time=NOW() WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine.id.to_string())
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine.id.to_string(),
+        });
+    }
     Ok(())
 }
 
@@ -556,13 +564,21 @@ pub async fn update_reboot_requested_explicit_time(
         verification_attempts: Some(0),
     };
 
-    let query = "UPDATE machines SET last_reboot_requested=$1 WHERE id=$2 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_reboot_requested=$1 WHERE id=$2";
+    if sqlx::query(query)
         .bind(sqlx::types::Json(&data))
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
     Ok(())
 }
 
@@ -584,13 +600,21 @@ pub async fn update_restart_verification_status(
     current_reboot.restart_verified = verified;
     current_reboot.verification_attempts = Some(attempts);
 
-    let query = "UPDATE machines SET last_reboot_requested=$1 WHERE id=$2 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_reboot_requested=$1 WHERE id=$2";
+    if sqlx::query(query)
         .bind(sqlx::types::Json(&current_reboot))
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
     Ok(())
 }
 
@@ -598,12 +622,20 @@ pub async fn update_cleanup_time(
     machine: &Machine,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET last_cleanup_time=NOW() WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_cleanup_time=NOW() WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine.id.to_string())
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine.id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -612,12 +644,20 @@ pub async fn update_bios_password_set_time(
     machine_id: &MachineId,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET bios_password_set_time=NOW() WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET bios_password_set_time=NOW() WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -626,12 +666,20 @@ pub async fn update_discovery_time(
     machine_id: &MachineId,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET last_discovery_time=NOW() WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_discovery_time=NOW() WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -640,12 +688,20 @@ pub async fn update_scout_contact_time(
     machine_id: &MachineId,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET last_scout_contact_time=NOW() WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_scout_contact_time=NOW() WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
     Ok(())
 }
 
@@ -1327,13 +1383,21 @@ pub async fn trigger_dpu_reprovisioning_request(
         restart_reprovision_requested_at: reprovision_time,
     };
 
-    let query = "UPDATE machines SET reprovisioning_requested=$2 WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET reprovisioning_requested=$2 WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine_id)
         .bind(sqlx::types::Json(req))
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -1756,12 +1820,20 @@ pub async fn update_machine_validation_time(
     machine_id: &MachineId,
     txn: &mut PgConnection,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET last_machine_validation_time=NOW() WHERE id=$1 RETURNING id";
-    let _id = sqlx::query_as::<_, MachineId>(query)
+    let query = "UPDATE machines SET last_machine_validation_time=NOW() WHERE id=$1";
+    if sqlx::query(query)
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::query(query, e))?;
+        .map_err(|e| DatabaseError::query(query, e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -2074,14 +2146,22 @@ pub async fn update_sku_status_last_match_attempt(
     txn: &mut PgConnection,
     machine_id: &MachineId,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET hw_sku_status=jsonb_set(coalesce(hw_sku_status, '{}'), '{last_match_attempt}', $1) WHERE id=$2 RETURNING id";
+    let query = "UPDATE machines SET hw_sku_status=jsonb_set(coalesce(hw_sku_status, '{}'), '{last_match_attempt}', $1) WHERE id=$2";
 
-    sqlx::query_as::<_, ()>(query)
+    if sqlx::query(query)
         .bind(sqlx::types::Json(Utc::now()))
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::new("update sku last match attempt", e))?;
+        .map_err(|e| DatabaseError::new("update sku last match attempt", e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -2090,14 +2170,22 @@ pub async fn update_sku_status_last_generate_attempt(
     txn: &mut PgConnection,
     machine_id: &MachineId,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET hw_sku_status=jsonb_set(coalesce(hw_sku_status, '{}'), '{last_generate_attempt}', $1) WHERE id=$2 RETURNING id";
+    let query = "UPDATE machines SET hw_sku_status=jsonb_set(coalesce(hw_sku_status, '{}'), '{last_generate_attempt}', $1) WHERE id=$2";
 
-    sqlx::query_as::<_, ()>(query)
+    if sqlx::query(query)
         .bind(sqlx::types::Json(Utc::now()))
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::new("update sku last generate attempt", e))?;
+        .map_err(|e| DatabaseError::new("update sku last generate attempt", e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
@@ -2106,14 +2194,22 @@ pub async fn update_sku_status_verify_request_time(
     txn: &mut PgConnection,
     machine_id: &MachineId,
 ) -> Result<(), DatabaseError> {
-    let query = "UPDATE machines SET hw_sku_status=jsonb_set(coalesce(hw_sku_status, '{}'), '{verify_request_time}', $1) WHERE id=$2 RETURNING id";
+    let query = "UPDATE machines SET hw_sku_status=jsonb_set(coalesce(hw_sku_status, '{}'), '{verify_request_time}', $1) WHERE id=$2";
 
-    sqlx::query_as::<_, ()>(query)
+    if sqlx::query(query)
         .bind(sqlx::types::Json(Utc::now()))
         .bind(machine_id)
-        .fetch_one(txn)
+        .execute(txn)
         .await
-        .map_err(|e| DatabaseError::new("update sku status", e))?;
+        .map_err(|e| DatabaseError::new("update sku status", e))?
+        .rows_affected()
+        != 1
+    {
+        return Err(DatabaseError::NotFoundError {
+            kind: "machine",
+            id: machine_id.to_string(),
+        });
+    }
 
     Ok(())
 }
