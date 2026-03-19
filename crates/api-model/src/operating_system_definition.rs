@@ -22,6 +22,7 @@
 //! The model type name matches the RPC message name (OperatingSystemDefinition).
 
 use ::rpc::forge::{self as forgerpc};
+use carbide_ipxe_renderer::{ArtifactCacheStrategy, IpxeOsArtifact, IpxeOsParameter};
 
 /// Operating system definition (list/get/create/update response).
 ///
@@ -43,8 +44,8 @@ pub struct OperatingSystemDefinition {
     pub updated: String,
     pub ipxe_script: Option<String>,
     pub ipxe_template_name: Option<String>,
-    pub ipxe_parameters: Vec<forgerpc::IpxeOsParameter>,
-    pub ipxe_artifacts: Vec<forgerpc::IpxeOsArtifact>,
+    pub ipxe_parameters: Vec<IpxeOsParameter>,
+    pub ipxe_artifacts: Vec<IpxeOsArtifact>,
     pub ipxe_definition_hash: Option<String>,
 }
 
@@ -66,8 +67,32 @@ impl From<OperatingSystemDefinition> for forgerpc::OperatingSystemDefinition {
             updated: m.updated,
             ipxe_script: m.ipxe_script,
             ipxe_template_name: m.ipxe_template_name,
-            ipxe_parameters: m.ipxe_parameters,
-            ipxe_artifacts: m.ipxe_artifacts,
+            ipxe_parameters: m
+                .ipxe_parameters
+                .into_iter()
+                .map(|p| forgerpc::IpxeOsParameter {
+                    name: p.name,
+                    value: p.value,
+                })
+                .collect(),
+            ipxe_artifacts: m
+                .ipxe_artifacts
+                .into_iter()
+                .map(|a| forgerpc::IpxeOsArtifact {
+                    name: a.name,
+                    url: a.url,
+                    sha: a.sha,
+                    auth_type: a.auth_type,
+                    auth_token: a.auth_token,
+                    cache_strategy: match a.cache_strategy {
+                        ArtifactCacheStrategy::CacheAsNeeded => 0,
+                        ArtifactCacheStrategy::LocalOnly => 1,
+                        ArtifactCacheStrategy::CachedOnly => 2,
+                        ArtifactCacheStrategy::RemoteOnly => 3,
+                    },
+                    local_url: a.local_url,
+                })
+                .collect(),
             ipxe_definition_hash: m.ipxe_definition_hash,
         }
     }
