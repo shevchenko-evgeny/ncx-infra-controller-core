@@ -2169,13 +2169,6 @@ message BatchInstanceAllocationResponse {
   repeated Instance instances = 1;
 }
 
-// OS scope enum
-enum OsScope {
-  OS_SCOPE_LOCAL = 0;   // Single local site only, sync both ways
-  OS_SCOPE_LIMITED = 1; // Multi-sites (fix list), rest overrides core during sync
-  OS_SCOPE_GLOBAL = 2;  // Multi-sites (any), rest overrides core during sync
-}
-
 // Parameter for iPXE template substitution or kernel command line
 // Can be used to replace variables in iPXE templates or add parameters to kernel command line
 // Some are "well known" like 'console', others can be custom defined by users

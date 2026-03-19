@@ -118,10 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "forge.IpxeScriptTemplate",
             "#[derive(serde::Deserialize, serde::Serialize)]",
         )
-        .type_attribute(
-            "forge.OsScope",
-            "#[derive(serde::Deserialize, serde::Serialize)]",
-        )
+        
         .type_attribute(
             "forge.ArtifactCacheStrategy",
             "#[derive(serde::Deserialize, serde::Serialize)]",

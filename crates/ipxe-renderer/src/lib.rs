@@ -21,18 +21,9 @@ pub struct IpxeOs {
     pub description: Option<String>,
     pub hash: String,
     pub tenant_id: Option<String>,
-    //pub scope: OsScope, // Not needed yet since we don't store in DB
     pub ipxe_template_name: String,
     pub parameters: Vec<IpxeOsParameter>,
     pub artifacts: Vec<IpxeOsArtifact>,
-}
-
-/// OS scope enum
-#[derive(Debug, Clone, PartialEq)]
-pub enum OsScope {
-    Local,   // Single local site only, sync both ways (default)
-    Limited, // Multi-sites (fix list), rest overrides core during sync
-    Global,  // Multi-sites (any), rest overrides core during sync
 }
 
 /// Parameter for iPXE template substitution

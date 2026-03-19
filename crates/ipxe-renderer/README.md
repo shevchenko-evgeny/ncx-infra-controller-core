@@ -27,7 +27,7 @@ This crate provides a flexible, template-based approach to generating iPXE boot 
 
 ```rust
 use carbide_ipxe_renderer::{
-    IpxeOsRenderer, DefaultIpxeOsRenderer, IpxeOs, IpxeOsParameter, OsScope
+    IpxeOsRenderer, DefaultIpxeOsRenderer, IpxeOs, IpxeOsParameter
 };
 
 // Create renderer
