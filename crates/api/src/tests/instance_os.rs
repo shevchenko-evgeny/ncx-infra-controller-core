@@ -20,6 +20,7 @@ use common::api_fixtures::{create_managed_host, create_test_env};
 use config_version::ConfigVersion;
 use rpc::forge::forge_server::Forge;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use uuid::Uuid;
 
 use crate::tests::common;
 
@@ -197,4 +198,73 @@ async fn test_update_instance_operating_system(_: PgPoolOptions, options: PgConn
         err.message(),
         "Invalid value: InlineIpxe::ipxe_script is empty"
     );
+}
+
+#[crate::sqlx_test]
+async fn test_create_instance_with_ipxe_template_os(_: PgPoolOptions, options: PgConnectOptions) {
+    let pool = PgPoolOptions::new().connect_with(options).await.unwrap();
+    let env = create_test_env(pool).await;
+    let segment_id = env.create_vpc_and_tenant_segment().await;
+    let mh = create_managed_host(&env).await;
+
+    let os_def = env
+        .api
+        .create_operating_system(tonic::Request::new(
+            rpc::forge::CreateOperatingSystemRequest {
+                id: None,
+                name: "template-os".to_string(),
+                org: "test-org".to_string(),
+                description: Some("iPXE template based OS".to_string()),
+                is_active: true,
+                allow_override: true,
+                phone_home_enabled: false,
+                user_data: Some("os-level-userdata".to_string()),
+                ipxe_script: None,
+                ipxe_template_name: Some("raw-ipxe".to_string()),
+                ipxe_parameters: vec![rpc::forge::IpxeOsParameter {
+                    name: "ipxe".to_string(),
+                    value: "chain http://boot.example.com".to_string(),
+                }],
+                ipxe_artifacts: vec![],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(os_def.r#type, "ipxe_os_definition");
+    let os_id: rpc::common::Uuid = Uuid::parse_str(&os_def.id).unwrap().into();
+
+    let instance_os = rpc::forge::OperatingSystem {
+        phone_home_enabled: false,
+        run_provisioning_instructions_on_every_boot: false,
+        user_data: Some("instance-userdata".to_string()),
+        variant: Some(rpc::forge::operating_system::Variant::OperatingSystemId(
+            os_id.clone(),
+        )),
+    };
+
+    let config = rpc::InstanceConfig {
+        tenant: Some(default_tenant_config()),
+        os: Some(instance_os),
+        network: Some(single_interface_network_config(segment_id)),
+        infiniband: None,
+        network_security_group_id: None,
+        dpu_extension_services: None,
+        nvlink: None,
+    };
+
+    let tinstance = mh.instance_builer(&env).config(config).build().await;
+    let instance = tinstance.rpc_instance().await;
+
+    assert_eq!(instance.status().tenant(), rpc::forge::TenantState::Ready);
+
+    let os = instance.config().os();
+    match &os.variant {
+        Some(rpc::forge::operating_system::Variant::OperatingSystemId(id)) => {
+            assert_eq!(id.value, os_def.id);
+        }
+        other => panic!("expected OperatingSystemId variant, got {other:?}"),
+    }
+    assert_eq!(os.user_data.as_deref(), Some("instance-userdata"));
 }

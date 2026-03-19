@@ -364,8 +364,7 @@ impl From<forgerpc::Instance> for InstanceDetail {
                             .run_provisioning_instructions_on_every_boot,
                         phone_home_enabled: os.phone_home_enabled,
                     },
-                    forgerpc::operating_system::Variant::IpxeOsDef(_)
-                    | forgerpc::operating_system::Variant::OperatingSystemId(_) => {
+                    forgerpc::operating_system::Variant::OperatingSystemId(_) => {
                         InstanceOs::default()
                     }
                 },

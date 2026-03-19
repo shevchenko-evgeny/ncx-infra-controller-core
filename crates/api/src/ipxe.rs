@@ -497,11 +497,6 @@ exit ||
                                 }
                                 tenant_ipxe
                             }
-                            model::os::OperatingSystemVariant::IpxeOsDefinition(os_def_id) => {
-                                let row = db::operating_system::get(txn, os_def_id).await?;
-                                let ipxeos = operating_system_row_to_ipxe_os(&row)?;
-                                Self::render_ipxe_os_definition(&ipxeos, "${base-url}", console)?
-                            }
                             model::os::OperatingSystemVariant::OperatingSystemId(os_id) => {
                                 let row = db::operating_system::get(txn, os_id).await?;
                                 if row.type_ == "ipxe_os_definition" {

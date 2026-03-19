@@ -294,26 +294,25 @@ impl TryFrom<InstanceSnapshotPgJson> for InstanceSnapshot {
             TenantOrganizationId::try_from(value.tenant_org.unwrap_or_default())
                 .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
-        // When operating_system_id is set, OS must be resolved by the caller and from_pg_json_and_os used instead.
-        // Fallback for legacy: derive OS from instance columns (os_image_id / os_ipxe_script).
-        // Require at least one of: os_image_id set, or non-empty iPXE script (no OS and no override is invalid).
+        // Derive OS variant from the instance columns.
+        // Priority: operating_system_id > os_image_id > inline iPXE script.
         let os = OperatingSystem {
-            variant: match value.os_image_id {
-                Some(x) => OperatingSystemVariant::OsImage(x),
-                None => {
-                    if value.os_ipxe_script.trim().is_empty() {
-                        return Err(sqlx::Error::ColumnDecode {
-                            index: "os_ipxe_script".to_string(),
-                            source: Box::new(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                "instance has no operating_system_id and no iPXE script (complete absence of OS definition)",
-                            )),
-                        });
-                    }
-                    OperatingSystemVariant::Ipxe(InlineIpxe {
-                        ipxe_script: value.os_ipxe_script,
-                    })
-                }
+            variant: if let Some(os_id) = value.operating_system_id {
+                OperatingSystemVariant::OperatingSystemId(os_id)
+            } else if let Some(image_id) = value.os_image_id {
+                OperatingSystemVariant::OsImage(image_id)
+            } else if !value.os_ipxe_script.trim().is_empty() {
+                OperatingSystemVariant::Ipxe(InlineIpxe {
+                    ipxe_script: value.os_ipxe_script,
+                })
+            } else {
+                return Err(sqlx::Error::ColumnDecode {
+                    index: "os_ipxe_script".to_string(),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "instance has no operating_system_id, no os_image_id, and no iPXE script",
+                    )),
+                });
             },
             run_provisioning_instructions_on_every_boot: value.os_always_boot_with_ipxe,
             phone_home_enabled: value.os_phone_home_enabled,
@@ -516,5 +515,19 @@ mod tests {
         assert!(matches!(err, sqlx::Error::ColumnDecode { .. }));
         assert!(format!("{err}").contains("no operating_system_id"));
         assert!(format!("{err}").contains("no iPXE script"));
+    }
+
+    #[test]
+    fn test_try_from_with_operating_system_id() {
+        let os_uuid = uuid::uuid!("b2c3d4e5-f6a7-4890-b234-567890abcdef");
+        let mut pg_json = minimal_pg_json();
+        pg_json.operating_system_id = Some(os_uuid);
+        pg_json.os_ipxe_script = String::new();
+        pg_json.os_image_id = None;
+        let snapshot = InstanceSnapshot::try_from(pg_json).unwrap();
+        assert!(matches!(
+            &snapshot.config.os.variant,
+            OperatingSystemVariant::OperatingSystemId(id) if *id == os_uuid
+        ));
     }
 }

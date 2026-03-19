@@ -67,8 +67,6 @@ pub enum OperatingSystemVariant {
     Ipxe(InlineIpxe),
     /// An operating system that references a qcow image
     OsImage(Uuid),
-    /// An operating system that uses iPXE template-based rendering
-    IpxeOsDefinition(Uuid),
     /// Reference to any operating system definition by ID (any variant except OS image).
     /// On read, the actual type (iPXE / ipxe_os_definition) is resolved from the row.
     OperatingSystemId(Uuid),
@@ -130,16 +128,6 @@ impl TryFrom<rpc::forge::OperatingSystem> for OperatingSystem {
                     RpcDataConversionError::InvalidUuid("os_image_id: ", e.to_string())
                 })?)
             }
-            rpc::forge::operating_system::Variant::IpxeOsDef(ipxe_os_def) => {
-                let id = ipxe_os_def
-                    .id
-                    .ok_or(RpcDataConversionError::MissingArgument(
-                        "IpxeOsDefinition::id",
-                    ))?;
-                OperatingSystemVariant::IpxeOsDefinition(Uuid::try_from(id).map_err(|e| {
-                    RpcDataConversionError::InvalidUuid("ipxe_os_definition_id: ", e.to_string())
-                })?)
-            }
             rpc::forge::operating_system::Variant::OperatingSystemId(id) => {
                 OperatingSystemVariant::OperatingSystemId(Uuid::try_from(id).map_err(|e| {
                     RpcDataConversionError::InvalidUuid("operating_system_id: ", e.to_string())
@@ -170,23 +158,6 @@ impl TryFrom<OperatingSystem> for rpc::forge::OperatingSystem {
             OperatingSystemVariant::OsImage(id) => {
                 rpc::forge::operating_system::Variant::OsImageId(id.into())
             }
-            OperatingSystemVariant::IpxeOsDefinition(id) => {
-                rpc::forge::operating_system::Variant::IpxeOsDef(rpc::forge::IpxeOsDefinition {
-                    id: Some(id.into()),
-                    name: String::new(),
-                    description: None,
-                    hash: String::new(),
-                    tenant_id: None,
-                    scope: None,
-                    ipxe_template_name: String::new(),
-                    parameters: Vec::new(),
-                    artifacts: Vec::new(),
-                    allow_override: false,
-                    created: String::new(),
-                    updated: String::new(),
-                    created_by: None,
-                })
-            }
             OperatingSystemVariant::OperatingSystemId(id) => {
                 rpc::forge::operating_system::Variant::OperatingSystemId(id.into())
             }
@@ -208,8 +179,7 @@ impl OperatingSystem {
         match &self.variant {
             OperatingSystemVariant::Ipxe(ipxe) => ipxe.validate(),
             OperatingSystemVariant::OsImage(_id) => Ok(()),
-            OperatingSystemVariant::IpxeOsDefinition(_id)
-            | OperatingSystemVariant::OperatingSystemId(_id) => Ok(()),
+            OperatingSystemVariant::OperatingSystemId(_id) => Ok(()),
         }
     }
 

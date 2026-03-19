@@ -241,7 +241,7 @@ fn build_operating_system_for_snapshot(
                 ipxe_script: script,
             })
         }
-        "ipxe_os_definition" => OperatingSystemVariant::IpxeOsDefinition(os_row.id),
+        "ipxe_os_definition" => OperatingSystemVariant::OperatingSystemId(os_row.id),
         _ => {
             tracing::warn!(
                 os_id = %os_row.id,
@@ -499,8 +499,7 @@ pub async fn update_config(
             os_image_id = Some(id);
             None
         }
-        OperatingSystemVariant::IpxeOsDefinition(id)
-        | OperatingSystemVariant::OperatingSystemId(id) => Some(*id),
+        OperatingSystemVariant::OperatingSystemId(id) => Some(*id),
     };
 
     let query = "UPDATE instances SET config_version=$1,
@@ -562,8 +561,7 @@ pub async fn update_os(
             os_image_id = Some(id);
             None
         }
-        OperatingSystemVariant::IpxeOsDefinition(id)
-        | OperatingSystemVariant::OperatingSystemId(id) => Some(*id),
+        OperatingSystemVariant::OperatingSystemId(id) => Some(*id),
     };
 
     let query = "UPDATE instances SET config_version=$1,
@@ -771,8 +769,7 @@ pub async fn batch_persist<'a>(
                 os_image_id = Some(*id);
                 None
             }
-            OperatingSystemVariant::IpxeOsDefinition(id)
-            | OperatingSystemVariant::OperatingSystemId(id) => Some(*id),
+            OperatingSystemVariant::OperatingSystemId(id) => Some(*id),
         };
 
         separated.push("(");

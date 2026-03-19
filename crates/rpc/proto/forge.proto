@@ -2273,11 +2273,11 @@ message OperatingSystem {
   oneof variant {
     InlineIpxe ipxe = 1;
     common.UUID os_image_id = 2;
-    IpxeOsDefinition ipxe_os_def = 3;
     // Reference any operating system definition by ID (any variant except OS image).
     // On read the actual variant (iPXE / ipxe_os_definition) is resolved from the row.
     common.UUID operating_system_id = 4;
   }
+  reserved 3;
 
   // If this flag is set to `true` the instance will not transition to a Ready state until
   // InstancePhoneHomeLastContact is updated
