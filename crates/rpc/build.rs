@@ -83,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "forge.AdminForceDeleteMachineResponse",
             "#[derive(serde::Serialize)]",
         )
+        .type_attribute("forge.ClientSecretBasic", "#[derive(serde::Serialize, serde::Deserialize)]")
         .type_attribute("forge.CredentialResponse", "#[derive(serde::Serialize)]")
         .type_attribute(".dns", "#[derive(serde::Serialize)]")
         .type_attribute("forge.FlatInterfaceConfig", "#[derive(serde::Serialize)]")
@@ -436,9 +437,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("ExpectedMachine", "#[derive(serde::Serialize)]")
         .type_attribute("ExpectedPowerShelf", "#[derive(serde::Serialize)]")
         .type_attribute("ExpectedSwitch", "#[derive(serde::Serialize)]")
+        .type_attribute("ExpectedRack", "#[derive(serde::Serialize)]")
         .type_attribute("ExpectedMachineList", "#[derive(serde::Serialize)]")
         .type_attribute("ExpectedPowerShelfList", "#[derive(serde::Serialize)]")
         .type_attribute("ExpectedSwitchList", "#[derive(serde::Serialize)]")
+        .type_attribute("ExpectedRackList", "#[derive(serde::Serialize)]")
         .type_attribute(
             "TpmCaCertDetail",
             "#[derive(serde::Deserialize, serde::Serialize)]",
