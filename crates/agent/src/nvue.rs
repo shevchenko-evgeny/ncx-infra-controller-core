@@ -86,6 +86,8 @@ pub fn build(conf: NvueConfig) -> eyre::Result<String> {
         .ct_routing_profile
         .as_ref()
         .map(|rt| TmplRoutingProfile {
+            LeakDefaultRouteFromUnderlay: rt.leak_default_route_from_underlay,
+            LeakTenantHostRoutesToUnderlay: rt.leak_tenant_host_routes_to_underlay,
             RouteTargetImports: rt
                 .route_target_imports
                 .iter()
@@ -163,6 +165,7 @@ pub fn build(conf: NvueConfig) -> eyre::Result<String> {
     let mut vpc_peer_prefixes = vec![];
     let mut has_vpc_peer_vnis = false;
     let mut vpc_peer_vnis = vec![];
+    let mut has_any_vpc_tenant_host_leak_to_underlay = false;
     for (base_i, network) in conf.ct_port_configs.into_iter().enumerate() {
         // If the instance is NOT in an FNN VPC, We make an assumption
         // here that there is only one tenant interface or at least
@@ -236,6 +239,12 @@ pub fn build(conf: NvueConfig) -> eyre::Result<String> {
                 })
                 .transpose()?,
         };
+
+        has_any_vpc_tenant_host_leak_to_underlay = has_any_vpc_tenant_host_leak_to_underlay
+            || routing_profile
+                .as_ref()
+                .map(|p| p.LeakTenantHostRoutesToUnderlay)
+                .unwrap_or_default();
 
         vpc_configs
             .entry(network.l3_vni.unwrap_or_default())
@@ -365,6 +374,7 @@ pub fn build(conf: NvueConfig) -> eyre::Result<String> {
         PublicPrefixInternalNextHop: public_prefix_internal_next_hop,
         VfInterceptHbnRepresentorIp: vf_intercept_hbn_representor_ip,
         VfInterceptBridgeSf: conf.vf_intercept_bridge_sf.unwrap_or_default(),
+        HasAnyVpcTenantHostLeakToUnderlay: has_any_vpc_tenant_host_leak_to_underlay,
         TrafficInterceptPublicPrefixes: conf
             .traffic_intercept_public_prefixes
             .iter()
@@ -892,6 +902,8 @@ pub struct NvueConfig {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct RoutingProfile {
+    pub leak_default_route_from_underlay: bool,
+    pub leak_tenant_host_routes_to_underlay: bool,
     pub route_target_imports: Vec<RouteTargetConfig>,
     pub route_targets_on_exports: Vec<RouteTargetConfig>,
 }
@@ -1028,6 +1040,10 @@ struct TmplNvue {
     /// The SF used to route traffic VF traffic to the HBN pod.
     VfInterceptBridgeSf: String,
 
+    /// Does any VPC at all have a routing profile that says
+    /// tenant routes should leak to the underlay?
+    HasAnyVpcTenantHostLeakToUnderlay: bool,
+
     /// The size of the of the prefix used for the internal
     /// bridge routing.
     InterceptBridgePrefixLen: u8,
@@ -1137,6 +1153,8 @@ struct TmplNetworkSecurityGroupRule {
 #[allow(non_snake_case)]
 #[derive(Clone, Gtmpl, Debug)]
 struct TmplRoutingProfile {
+    LeakTenantHostRoutesToUnderlay: bool,
+    LeakDefaultRouteFromUnderlay: bool,
     RouteTargetImports: Vec<TmplRouteTargetConfig>,
     RouteTargetsOnExports: Vec<TmplRouteTargetConfig>,
 }

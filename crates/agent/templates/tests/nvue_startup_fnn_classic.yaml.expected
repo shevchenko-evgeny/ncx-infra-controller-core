@@ -269,6 +269,22 @@
               '10':
                 action:
                   deny: {}
+          FROM_DEFAULT_VRF_TO_vpc_1025186_MAP:
+            rule:
+              '10':
+                action:
+                  permit: {}
+                match:
+                  ip-prefix-list: FROM_DEFAULT_VRF_TO_vpc_1025186_PREFIX_LIST
+                  type: ipv4
+          FROM_DEFAULT_VRF_TO_vpc_1025197_MAP:
+            rule:
+              '10':
+                action:
+                  permit: {}
+                match:
+                  ip-prefix-list: FROM_DEFAULT_VRF_TO_vpc_1025197_PREFIX_LIST
+                  type: ipv4
     vrf:
       default:
         router:
@@ -292,6 +308,14 @@
                 redistribute:
                   connected:
                     enable: on
+
+                route-import:
+                  from-vrf:
+                    route-map: leak_to_underlay
+                    enable: on
+                    list:
+                      vpc_1025186: {}
+                      vpc_1025197: {}
               l2vpn-evpn:
                 enable: on
             enable: on
