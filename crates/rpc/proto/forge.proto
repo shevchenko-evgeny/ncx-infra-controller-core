@@ -2204,36 +2204,6 @@ message IpxeOsArtifact {
   optional string local_url = 7;            // Local cached URL, set by carbide-core on successful download. If present overrides 'url' at boot time.
 }
 
-// Template-based iPXE OS definition (NEW variant for OperatingSystem)
-// This is the recommended approach for defining iPXE-based OS
-// Ultimately it should replace current Operating System.
-message IpxeOsDefinition {
-  // Basic info
-  optional common.UUID id = 1;
-  string name = 2;
-  optional string description = 3;
-  string hash = 4;  // hash of the definition for change detection
-
-  // Relationships
-//  optional common.UUID infrastructure_provider_id = 5;
-  optional string tenant_id = 6; // org name for tenant
-
-  // Scope
-  optional OsScope scope = 8;  // Global or Local, unused until DB sync is needed
-
-  // Core iPXE OS definition
-  string ipxe_template_name = 9;                    // Name of iPXE script template (carbide-core has the list)
-  repeated IpxeOsParameter parameters = 10;         // Parameters to replace in template or add to kernel command line
-  repeated IpxeOsArtifact artifacts = 11;           // Artifacts to be downloaded (remote or local/cached)
-
-  bool allow_override = 13;
-
-  // Timestamps
-  string created = 17;
-  string updated = 18;
-  common.UUID created_by = 19;
-}
-
 // Scope for iPXE script templates.
 enum IpxeScriptTemplateScope {
   INTERNAL = 0;  // Carbide-core usage only

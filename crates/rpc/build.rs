@@ -105,10 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Deserialize, serde::Serialize)]",
         )
         .type_attribute("forge.InstanceStorageConfig", "#[derive(serde::Serialize)]")
-        .type_attribute(
-            "forge.IpxeOsDefinition",
-            "#[derive(serde::Deserialize, serde::Serialize)]",
-        )
+        
         .type_attribute(
             "forge.IpxeOsParameter",
             "#[derive(serde::Deserialize, serde::Serialize)]",
