@@ -33,7 +33,7 @@ pub struct OperatingSystemDefinition {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
-    pub org: String,
+    pub tenant_organization_id: String,
     pub type_: String,
     pub status: String,
     pub is_active: bool,
@@ -51,12 +51,17 @@ pub struct OperatingSystemDefinition {
 
 impl From<OperatingSystemDefinition> for forgerpc::OperatingSystemDefinition {
     fn from(m: OperatingSystemDefinition) -> Self {
+        let os_type = match m.type_.as_str() {
+            "iPXE" => forgerpc::OperatingSystemType::OsTypeIpxe,
+            "ipxe_os_definition" => forgerpc::OperatingSystemType::OsTypeIpxeOsDefinition,
+            _ => forgerpc::OperatingSystemType::OsTypeUnspecified,
+        };
         Self {
-            id: m.id,
+            id: Some(::rpc::common::Uuid { value: m.id }),
             name: m.name,
             description: m.description,
-            org: m.org,
-            r#type: m.type_,
+            tenant_organization_id: m.tenant_organization_id,
+            r#type: os_type as i32,
             status: forgerpc::TenantState::from_str_name(&m.status.to_uppercase())
                 .unwrap_or_default() as i32,
             is_active: m.is_active,

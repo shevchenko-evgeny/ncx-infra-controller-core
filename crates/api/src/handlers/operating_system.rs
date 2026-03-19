@@ -215,8 +215,8 @@ pub async fn create_operating_system(
     if req.name.is_empty() {
         return Err(Status::invalid_argument("name is required"));
     }
-    if req.org.is_empty() {
-        return Err(Status::invalid_argument("org is required"));
+    if req.tenant_organization_id.is_empty() {
+        return Err(Status::invalid_argument("tenant_organization_id is required"));
     }
 
     let id = req
@@ -230,7 +230,7 @@ pub async fn create_operating_system(
         id,
         name: req.name,
         description: req.description,
-        org: req.org,
+        org: req.tenant_organization_id,
         type_,
         is_active: req.is_active,
         allow_override: req.allow_override,
@@ -392,7 +392,7 @@ pub async fn find_operating_system_ids(
     let mut txn = api.txn_begin().await?;
     let filter = request.into_inner();
 
-    let ids = db::operating_system::list_ids(&mut txn, filter.org.as_deref())
+    let ids = db::operating_system::list_ids(&mut txn, filter.tenant_organization_id.as_deref())
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
     txn.commit()

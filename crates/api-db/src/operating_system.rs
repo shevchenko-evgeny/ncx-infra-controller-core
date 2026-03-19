@@ -90,7 +90,7 @@ impl From<&OperatingSystem> for model::operating_system_definition::OperatingSys
             id: row.id.to_string(),
             name: row.name.clone(),
             description: row.description.clone(),
-            org: row.org.clone(),
+            tenant_organization_id: row.org.clone(),
             type_: row.type_.clone(),
             status: row.status.clone(),
             is_active: row.is_active,

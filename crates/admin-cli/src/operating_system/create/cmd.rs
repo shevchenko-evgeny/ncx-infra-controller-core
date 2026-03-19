@@ -34,7 +34,7 @@ pub async fn create(opts: Args, api_client: &ApiClient) -> CarbideCliResult<()> 
         .0
         .create_operating_system(CreateOperatingSystemRequest {
             name: opts.name,
-            org: opts.org,
+            tenant_organization_id: opts.org,
             description: opts.description,
             is_active: opts.is_active,
             allow_override: opts.allow_override,
@@ -49,6 +49,10 @@ pub async fn create(opts: Args, api_client: &ApiClient) -> CarbideCliResult<()> 
         .await
         .map_err(CarbideCliError::from)?;
 
-    println!("Operating system created: {} (id={})", os.name, os.id);
+    println!(
+        "Operating system created: {} (id={})",
+        os.name,
+        os.id.as_ref().map(|u| u.value.as_str()).unwrap_or("")
+    );
     Ok(())
 }

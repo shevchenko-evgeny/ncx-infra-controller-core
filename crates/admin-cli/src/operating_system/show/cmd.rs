@@ -16,7 +16,7 @@
  */
 
 use ::rpc::admin_cli::{CarbideCliError, CarbideCliResult, OutputFormat};
-use ::rpc::forge::{ArtifactCacheStrategy, OperatingSystemSearchFilter};
+use ::rpc::forge::{ArtifactCacheStrategy, OperatingSystemSearchFilter, OperatingSystemType};
 use prettytable::{Cell, Row, Table};
 
 use super::args::Args;
@@ -43,7 +43,7 @@ async fn list_all(
     let id_list = api_client
         .0
         .find_operating_system_ids(OperatingSystemSearchFilter {
-            org: opts.org,
+            tenant_organization_id: opts.org,
         })
         .await?;
 
@@ -105,11 +105,16 @@ async fn list_all(
                 .collect::<Vec<_>>()
                 .join("\n")
         };
+        let id_str = os.id.as_ref().map(|u| u.value.as_str()).unwrap_or("");
         table.add_row(Row::new(vec![
-            Cell::new(&os.id),
+            Cell::new(id_str),
             Cell::new(&os.name),
-            Cell::new(&os.org),
-            Cell::new(&os.r#type),
+            Cell::new(&os.tenant_organization_id),
+            Cell::new(
+                OperatingSystemType::try_from(os.r#type)
+                    .map(|t| t.as_str_name())
+                    .unwrap_or("UNKNOWN"),
+            ),
             Cell::new(os.ipxe_template_name.as_deref().unwrap_or("-")),
             Cell::new(&params_str),
             Cell::new(&artifacts_str),
@@ -148,10 +153,15 @@ async fn show_one(
         return Ok(());
     }
 
-    println!("ID:                  {}", os.id);
+    println!("ID:                  {}", os.id.as_ref().map(|u| u.value.as_str()).unwrap_or(""));
     println!("Name:                {}", os.name);
-    println!("Org:                 {}", os.org);
-    println!("Type:                {}", os.r#type);
+    println!("Org:                 {}", os.tenant_organization_id);
+    println!(
+        "Type:                {}",
+        OperatingSystemType::try_from(os.r#type)
+            .map(|t| t.as_str_name().to_string())
+            .unwrap_or_else(|_| os.r#type.to_string())
+    );
     println!("Status:              {}", os.status);
     println!("Active:              {}", os.is_active);
     println!("Allow Override:      {}", os.allow_override);

@@ -2240,7 +2240,6 @@ message OperatingSystem {
     // On read the actual variant (iPXE / ipxe_os_definition) is resolved from the row.
     common.UUID operating_system_id = 4;
   }
-  reserved 3;
 
   // If this flag is set to `true` the instance will not transition to a Ready state until
   // InstancePhoneHomeLastContact is updated
@@ -7120,12 +7119,19 @@ message ListComponentFirmwareVersionsResponse {
 // --- Operating System library messages ---
 
 // Operating system definition (CRUD resource, table operating_systems).
+// Type of Operating System variant
+enum OperatingSystemType {
+  OS_TYPE_UNSPECIFIED = 0;
+  OS_TYPE_IPXE = 1;              // Raw inline iPXE script
+  OS_TYPE_IPXE_OS_DEFINITION = 2; // iPXE OS using an iPXE template
+}
+
 message OperatingSystemDefinition {
-  string id = 1;
+  common.UUID id = 1;
   string name = 2;
   optional string description = 3;
-  string org = 4;
-  string type = 5;
+  string tenant_organization_id = 4;
+  OperatingSystemType type = 5;
   TenantState status = 6; // we only use some states from TenantState
   bool is_active = 7;
   bool allow_override = 8;
@@ -7146,7 +7152,7 @@ message OperatingSystemDefinition {
 message CreateOperatingSystemRequest {
   string name = 1;
   optional string description = 2;
-  string org = 3;
+  string tenant_organization_id = 3;
   bool is_active = 4;
   bool allow_override = 5;
   bool phone_home_enabled = 6;
@@ -7184,7 +7190,7 @@ message DeleteOperatingSystemRequest {
 message DeleteOperatingSystemResponse {}
 
 message OperatingSystemSearchFilter {
-  optional string org = 1;
+  optional string tenant_organization_id = 1;
 }
 
 message OperatingSystemIdList {

@@ -20,7 +20,7 @@ use common::api_fixtures::{create_managed_host, create_test_env};
 use config_version::ConfigVersion;
 use rpc::forge::forge_server::Forge;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use uuid::Uuid;
+
 
 use crate::tests::common;
 
@@ -213,7 +213,7 @@ async fn test_create_instance_with_ipxe_template_os(_: PgPoolOptions, options: P
             rpc::forge::CreateOperatingSystemRequest {
                 id: None,
                 name: "template-os".to_string(),
-                org: "test-org".to_string(),
+                tenant_organization_id: "test-org".to_string(),
                 description: Some("iPXE template based OS".to_string()),
                 is_active: true,
                 allow_override: true,
@@ -232,8 +232,11 @@ async fn test_create_instance_with_ipxe_template_os(_: PgPoolOptions, options: P
         .unwrap()
         .into_inner();
 
-    assert_eq!(os_def.r#type, "ipxe_os_definition");
-    let os_id: rpc::common::Uuid = Uuid::parse_str(&os_def.id).unwrap().into();
+    assert_eq!(
+        os_def.r#type,
+        rpc::forge::OperatingSystemType::OsTypeIpxeOsDefinition as i32
+    );
+    let os_id = os_def.id.clone().unwrap();
 
     let instance_os = rpc::forge::OperatingSystem {
         phone_home_enabled: false,
@@ -262,7 +265,7 @@ async fn test_create_instance_with_ipxe_template_os(_: PgPoolOptions, options: P
     let os = instance.config().os();
     match &os.variant {
         Some(rpc::forge::operating_system::Variant::OperatingSystemId(id)) => {
-            assert_eq!(id.value, os_def.id);
+            assert_eq!(id.value, os_def.id.as_ref().unwrap().value);
         }
         other => panic!("expected OperatingSystemId variant, got {other:?}"),
     }

@@ -106,11 +106,13 @@ impl From<IpxeOsArtifact> for SerializableArtifact {
 impl From<OperatingSystemDefinition> for SerializableOs {
     fn from(os: OperatingSystemDefinition) -> Self {
         Self {
-            id: os.id,
+            id: os.id.map(|u| u.value).unwrap_or_default(),
             name: os.name,
             description: os.description,
-            org: os.org,
-            os_type: os.r#type,
+            org: os.tenant_organization_id,
+            os_type: forgerpc::OperatingSystemType::try_from(os.r#type)
+                .map(|t| t.as_str_name().to_string())
+                .unwrap_or_else(|_| os.r#type.to_string()),
             status: forgerpc::TenantState::try_from(os.status)
                 .map(|s| s.as_str_name().to_string())
                 .unwrap_or_else(|_| os.status.to_string()),

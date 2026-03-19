@@ -43,6 +43,10 @@ pub async fn update(opts: Args, api_client: &ApiClient) -> CarbideCliResult<()> 
         .await
         .map_err(CarbideCliError::from)?;
 
-    println!("Operating system updated: {} (id={})", os.name, os.id);
+    println!(
+        "Operating system updated: {} (id={})",
+        os.name,
+        os.id.as_ref().map(|u| u.value.as_str()).unwrap_or("")
+    );
     Ok(())
 }

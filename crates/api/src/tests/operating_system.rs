@@ -16,6 +16,7 @@
  */
 
 use rpc::forge::forge_server::Forge;
+use rpc::forge::OperatingSystemType;
 use tonic::Code;
 
 use crate::tests::common::api_fixtures::create_test_env;
@@ -29,7 +30,7 @@ async fn test_create_operating_system_ipxe(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "test-ipxe-os".to_string(),
-            org: "test-org".to_string(),
+            tenant_organization_id: "test-org".to_string(),
             description: Some("inline iPXE OS".to_string()),
             is_active: true,
             allow_override: true,
@@ -45,8 +46,8 @@ async fn test_create_operating_system_ipxe(pool: sqlx::PgPool) {
 
     let os = resp.into_inner();
     assert_eq!(os.name, "test-ipxe-os");
-    assert_eq!(os.org, "test-org");
-    assert_eq!(os.r#type, "iPXE");
+    assert_eq!(os.tenant_organization_id, "test-org");
+    assert_eq!(os.r#type, OperatingSystemType::OsTypeIpxe as i32);
     assert_eq!(os.description.as_deref(), Some("inline iPXE OS"));
     assert!(os.is_active);
     assert!(os.allow_override);
@@ -57,7 +58,7 @@ async fn test_create_operating_system_ipxe(pool: sqlx::PgPool) {
         Some("chain --autofree https://boot.netboot.xyz")
     );
     assert!(os.ipxe_template_name.is_none());
-    assert!(!os.id.is_empty());
+    assert!(os.id.is_some());
 }
 
 #[crate::sqlx_test]
@@ -69,7 +70,7 @@ async fn test_create_operating_system_requires_name(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "".to_string(),
-            org: "test-org".to_string(),
+            tenant_organization_id: "test-org".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -95,7 +96,7 @@ async fn test_create_operating_system_requires_variant(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "test-os".to_string(),
-            org: "test-org".to_string(),
+            tenant_organization_id: "test-org".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -121,7 +122,7 @@ async fn test_get_operating_system(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "get-test-os".to_string(),
-            org: "org1".to_string(),
+            tenant_organization_id: "org1".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -136,7 +137,7 @@ async fn test_get_operating_system(pool: sqlx::PgPool) {
         .unwrap()
         .into_inner();
 
-    let id: rpc::common::Uuid = uuid::Uuid::parse_str(&created.id).unwrap().into();
+    let id = created.id.clone().unwrap();
 
     let fetched = env
         .api
@@ -147,7 +148,7 @@ async fn test_get_operating_system(pool: sqlx::PgPool) {
 
     assert_eq!(fetched.id, created.id);
     assert_eq!(fetched.name, "get-test-os");
-    assert_eq!(fetched.r#type, "iPXE");
+    assert_eq!(fetched.r#type, OperatingSystemType::OsTypeIpxe as i32);
 }
 
 #[crate::sqlx_test]
@@ -173,7 +174,7 @@ async fn test_update_operating_system(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "original-name".to_string(),
-            org: "org1".to_string(),
+            tenant_organization_id: "org1".to_string(),
             description: Some("original desc".to_string()),
             is_active: true,
             allow_override: false,
@@ -188,7 +189,7 @@ async fn test_update_operating_system(pool: sqlx::PgPool) {
         .unwrap()
         .into_inner();
 
-    let id: rpc::common::Uuid = uuid::Uuid::parse_str(&created.id).unwrap().into();
+    let id = created.id.clone().unwrap();
 
     let updated = env
         .api
@@ -230,7 +231,7 @@ async fn test_delete_operating_system(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "delete-test-os".to_string(),
-            org: "org1".to_string(),
+            tenant_organization_id: "org1".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -245,7 +246,7 @@ async fn test_delete_operating_system(pool: sqlx::PgPool) {
         .unwrap()
         .into_inner();
 
-    let id: rpc::common::Uuid = uuid::Uuid::parse_str(&created.id).unwrap().into();
+    let id = created.id.clone().unwrap();
 
     let del_resp = env
         .api
@@ -270,7 +271,7 @@ async fn test_find_operating_system_ids(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "find-os-1".to_string(),
-            org: "find-org".to_string(),
+            tenant_organization_id: "find-org".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -290,7 +291,7 @@ async fn test_find_operating_system_ids(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "find-os-2".to_string(),
-            org: "find-org".to_string(),
+            tenant_organization_id: "find-org".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -309,7 +310,7 @@ async fn test_find_operating_system_ids(pool: sqlx::PgPool) {
         .api
         .find_operating_system_ids(tonic::Request::new(
             rpc::forge::OperatingSystemSearchFilter {
-                org: Some("find-org".to_string()),
+                tenant_organization_id: Some("find-org".to_string()),
             },
         ))
         .await
@@ -317,8 +318,10 @@ async fn test_find_operating_system_ids(pool: sqlx::PgPool) {
         .into_inner();
 
     let ids: Vec<String> = resp.ids.iter().map(|u| u.value.clone()).collect();
-    assert!(ids.contains(&os1.id));
-    assert!(ids.contains(&os2.id));
+    let os1_id = os1.id.as_ref().unwrap().value.clone();
+    let os2_id = os2.id.as_ref().unwrap().value.clone();
+    assert!(ids.contains(&os1_id));
+    assert!(ids.contains(&os2_id));
     assert_eq!(ids.len(), 2);
 }
 
@@ -331,7 +334,7 @@ async fn test_find_operating_systems_by_ids(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "by-id-os-1".to_string(),
-            org: "org1".to_string(),
+            tenant_organization_id: "org1".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -346,7 +349,7 @@ async fn test_find_operating_systems_by_ids(pool: sqlx::PgPool) {
         .unwrap()
         .into_inner();
 
-    let id1: rpc::common::Uuid = uuid::Uuid::parse_str(&os1.id).unwrap().into();
+    let id1 = os1.id.clone().unwrap();
 
     let resp = env
         .api
@@ -445,7 +448,7 @@ async fn test_create_operating_system_with_explicit_id(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: Some(id_proto),
             name: "explicit-id-os".to_string(),
-            org: "org1".to_string(),
+            tenant_organization_id: "org1".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -460,7 +463,7 @@ async fn test_create_operating_system_with_explicit_id(pool: sqlx::PgPool) {
         .unwrap()
         .into_inner();
 
-    assert_eq!(resp.id, explicit_id.to_string());
+    assert_eq!(resp.id.unwrap().value, explicit_id.to_string());
 }
 
 #[crate::sqlx_test]
@@ -472,7 +475,7 @@ async fn test_deleted_os_not_returned_by_find_ids(pool: sqlx::PgPool) {
         .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
             id: None,
             name: "soon-deleted-os".to_string(),
-            org: "del-org".to_string(),
+            tenant_organization_id: "del-org".to_string(),
             description: None,
             is_active: true,
             allow_override: true,
@@ -487,7 +490,7 @@ async fn test_deleted_os_not_returned_by_find_ids(pool: sqlx::PgPool) {
         .unwrap()
         .into_inner();
 
-    let id: rpc::common::Uuid = uuid::Uuid::parse_str(&created.id).unwrap().into();
+    let id = created.id.clone().unwrap();
     env.api
         .delete_operating_system(tonic::Request::new(id.into()))
         .await
@@ -497,7 +500,7 @@ async fn test_deleted_os_not_returned_by_find_ids(pool: sqlx::PgPool) {
         .api
         .find_operating_system_ids(tonic::Request::new(
             rpc::forge::OperatingSystemSearchFilter {
-                org: Some("del-org".to_string()),
+                tenant_organization_id: Some("del-org".to_string()),
             },
         ))
         .await
