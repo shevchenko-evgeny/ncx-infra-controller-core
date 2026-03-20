@@ -2045,6 +2045,21 @@ impl Forge for Api {
         crate::handlers::operating_system::find_operating_systems_by_ids(self, request).await
     }
 
+    async fn get_operating_system_artifacts(
+        &self,
+        request: Request<rpc::GetOperatingSystemArtifactsRequest>,
+    ) -> Result<Response<rpc::OperatingSystemArtifactsResponse>, Status> {
+        crate::handlers::operating_system::get_operating_system_artifacts(self, request).await
+    }
+
+    async fn set_operating_system_artifacts_local_url(
+        &self,
+        request: Request<rpc::SetOperatingSystemArtifactsLocalUrlRequest>,
+    ) -> Result<Response<rpc::OperatingSystemArtifactsResponse>, Status> {
+        crate::handlers::operating_system::set_operating_system_artifacts_local_url(self, request)
+            .await
+    }
+
     async fn get_machine_validation_runs(
         &self,
         request: Request<rpc::MachineValidationRunListGetRequest>,

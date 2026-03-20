@@ -16,7 +16,7 @@
  */
 
 use rpc::forge::forge_server::Forge;
-use rpc::forge::OperatingSystemType;
+use rpc::forge::{ArtifactCacheStrategy, IpxeOsArtifact, OperatingSystemType, TenantState};
 use tonic::Code;
 
 use crate::tests::common::api_fixtures::create_test_env;
@@ -417,6 +417,377 @@ async fn test_get_ipxe_script_template(pool: sqlx::PgPool) {
 
     assert_eq!(&resp.name, first_name);
     assert!(!resp.template.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Helpers shared by artifact tests
+// ---------------------------------------------------------------------------
+
+/// Creates an OS with a qcow-image template and two CACHED_ONLY artifacts plus
+/// one CACHE_AS_NEEDED artifact, then returns the OS UUID string.
+async fn create_os_with_artifacts(
+    env: &crate::tests::common::api_fixtures::TestEnv,
+) -> rpc::common::Uuid {
+    let resp = env
+        .api
+        .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
+            id: None,
+            name: "artifact-test-os".to_string(),
+            tenant_organization_id: "org1".to_string(),
+            description: None,
+            is_active: true,
+            allow_override: true,
+            phone_home_enabled: false,
+            user_data: None,
+            ipxe_script: None,
+            ipxe_template_name: Some("qcow-image".to_string()),
+            ipxe_parameters: vec![rpc::forge::IpxeOsParameter {
+                name: "image_url".to_string(),
+                value: "http://example.com/image.qcow2".to_string(),
+            }],
+            ipxe_artifacts: vec![
+                IpxeOsArtifact {
+                    name: "kernel".to_string(),
+                    url: "http://example.com/kernel".to_string(),
+                    sha: None,
+                    auth_type: None,
+                    auth_token: None,
+                    cache_strategy: ArtifactCacheStrategy::CachedOnly as i32,
+                    local_url: None,
+                },
+                IpxeOsArtifact {
+                    name: "initrd".to_string(),
+                    url: "http://example.com/initrd".to_string(),
+                    sha: None,
+                    auth_type: None,
+                    auth_token: None,
+                    cache_strategy: ArtifactCacheStrategy::CachedOnly as i32,
+                    local_url: None,
+                },
+                IpxeOsArtifact {
+                    name: "extra".to_string(),
+                    url: "http://example.com/extra".to_string(),
+                    sha: None,
+                    auth_type: None,
+                    auth_token: None,
+                    cache_strategy: ArtifactCacheStrategy::CacheAsNeeded as i32,
+                    local_url: None,
+                },
+            ],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    resp.id.unwrap()
+}
+
+// ---------------------------------------------------------------------------
+// GetOperatingSystemArtifacts tests
+// ---------------------------------------------------------------------------
+
+#[crate::sqlx_test]
+async fn test_get_operating_system_artifacts_returns_ordered_list(pool: sqlx::PgPool) {
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    let resp = env
+        .api
+        .get_operating_system_artifacts(tonic::Request::new(
+            rpc::forge::GetOperatingSystemArtifactsRequest {
+                id: Some(os_id),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(resp.artifacts.len(), 3);
+    assert_eq!(resp.artifacts[0].name, "kernel");
+    assert_eq!(resp.artifacts[1].name, "initrd");
+    assert_eq!(resp.artifacts[2].name, "extra");
+}
+
+#[crate::sqlx_test]
+async fn test_get_operating_system_artifacts_not_found(pool: sqlx::PgPool) {
+    let env = create_test_env(pool).await;
+    let id: rpc::common::Uuid = uuid::Uuid::nil().into();
+
+    let resp = env
+        .api
+        .get_operating_system_artifacts(tonic::Request::new(
+            rpc::forge::GetOperatingSystemArtifactsRequest { id: Some(id) },
+        ))
+        .await;
+
+    assert!(resp.is_err());
+    assert_eq!(resp.unwrap_err().code(), Code::NotFound);
+}
+
+// ---------------------------------------------------------------------------
+// SetOperatingSystemArtifactsLocalUrl tests
+// ---------------------------------------------------------------------------
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_local_url_partial_update(pool: sqlx::PgPool) {
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    // Only update the first artifact (partial list).
+    let resp = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id.clone()),
+                updates: vec![rpc::forge::ArtifactLocalUrlUpdate {
+                    name: "kernel".to_string(),
+                    local_url: Some("http://cache.local/kernel".to_string()),
+                }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(resp.artifacts.len(), 3);
+    assert_eq!(
+        resp.artifacts[0].local_url.as_deref(),
+        Some("http://cache.local/kernel")
+    );
+    assert!(resp.artifacts[1].local_url.is_none()); // initrd unchanged
+    assert!(resp.artifacts[2].local_url.is_none()); // extra unchanged
+}
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_local_url_ordered_duplicate_names(pool: sqlx::PgPool) {
+    // OS has two artifacts named "kernel". Updates must appear twice to set both.
+    let env = create_test_env(pool).await;
+
+    let os = env
+        .api
+        .create_operating_system(tonic::Request::new(rpc::forge::CreateOperatingSystemRequest {
+            id: None,
+            name: "dup-kernel-os".to_string(),
+            tenant_organization_id: "org1".to_string(),
+            description: None,
+            is_active: true,
+            allow_override: true,
+            phone_home_enabled: false,
+            user_data: None,
+            ipxe_script: None,
+            ipxe_template_name: Some("qcow-image".to_string()),
+            ipxe_parameters: vec![rpc::forge::IpxeOsParameter {
+                name: "image_url".to_string(),
+                value: "http://example.com/image.qcow2".to_string(),
+            }],
+            ipxe_artifacts: vec![
+                IpxeOsArtifact {
+                    name: "kernel".to_string(),
+                    url: "http://example.com/kernel-a".to_string(),
+                    sha: None,
+                    auth_type: None,
+                    auth_token: None,
+                    cache_strategy: ArtifactCacheStrategy::CachedOnly as i32,
+                    local_url: None,
+                },
+                IpxeOsArtifact {
+                    name: "kernel".to_string(),
+                    url: "http://example.com/kernel-b".to_string(),
+                    sha: None,
+                    auth_type: None,
+                    auth_token: None,
+                    cache_strategy: ArtifactCacheStrategy::CachedOnly as i32,
+                    local_url: None,
+                },
+            ],
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let os_id = os.id.unwrap();
+
+    // Two updates for "kernel" — each consumes the next unmatched occurrence.
+    let resp = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id.clone()),
+                updates: vec![
+                    rpc::forge::ArtifactLocalUrlUpdate {
+                        name: "kernel".to_string(),
+                        local_url: Some("http://cache.local/kernel-a".to_string()),
+                    },
+                    rpc::forge::ArtifactLocalUrlUpdate {
+                        name: "kernel".to_string(),
+                        local_url: Some("http://cache.local/kernel-b".to_string()),
+                    },
+                ],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(resp.artifacts[0].local_url.as_deref(), Some("http://cache.local/kernel-a"));
+    assert_eq!(resp.artifacts[1].local_url.as_deref(), Some("http://cache.local/kernel-b"));
+}
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_local_url_too_many_same_name_fails(pool: sqlx::PgPool) {
+    // Only one "kernel" in the OS but two update entries → second should fail.
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    let resp = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id),
+                updates: vec![
+                    rpc::forge::ArtifactLocalUrlUpdate {
+                        name: "kernel".to_string(),
+                        local_url: Some("http://cache.local/kernel-1".to_string()),
+                    },
+                    rpc::forge::ArtifactLocalUrlUpdate {
+                        name: "kernel".to_string(), // no second kernel exists
+                        local_url: Some("http://cache.local/kernel-2".to_string()),
+                    },
+                ],
+            },
+        ))
+        .await;
+
+    assert!(resp.is_err());
+    assert_eq!(resp.unwrap_err().code(), Code::NotFound);
+}
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_local_url_unknown_name_fails(pool: sqlx::PgPool) {
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    let resp = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id),
+                updates: vec![rpc::forge::ArtifactLocalUrlUpdate {
+                    name: "does-not-exist".to_string(),
+                    local_url: Some("http://cache.local/whatever".to_string()),
+                }],
+            },
+        ))
+        .await;
+
+    assert!(resp.is_err());
+    assert_eq!(resp.unwrap_err().code(), Code::NotFound);
+}
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_transitions_to_ready_when_all_cached_only_set(pool: sqlx::PgPool) {
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    // Set local_url only for the two CACHED_ONLY artifacts; leave the
+    // CACHE_AS_NEEDED "extra" artifact untouched.
+    let _ = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id.clone()),
+                updates: vec![
+                    rpc::forge::ArtifactLocalUrlUpdate {
+                        name: "kernel".to_string(),
+                        local_url: Some("http://cache.local/kernel".to_string()),
+                    },
+                    rpc::forge::ArtifactLocalUrlUpdate {
+                        name: "initrd".to_string(),
+                        local_url: Some("http://cache.local/initrd".to_string()),
+                    },
+                ],
+            },
+        ))
+        .await
+        .unwrap();
+
+    // Status should now be READY.
+    let fetched = env
+        .api
+        .get_operating_system(tonic::Request::new(os_id))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(fetched.status, TenantState::Ready as i32);
+}
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_does_not_transition_to_ready_when_cached_only_incomplete(
+    pool: sqlx::PgPool,
+) {
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    // Only set kernel; initrd (also CACHED_ONLY) is still missing.
+    let _ = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id.clone()),
+                updates: vec![rpc::forge::ArtifactLocalUrlUpdate {
+                    name: "kernel".to_string(),
+                    local_url: Some("http://cache.local/kernel".to_string()),
+                }],
+            },
+        ))
+        .await
+        .unwrap();
+
+    let fetched = env
+        .api
+        .get_operating_system(tonic::Request::new(os_id))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_ne!(fetched.status, TenantState::Ready as i32);
+}
+
+#[crate::sqlx_test]
+async fn test_set_artifacts_local_url_clear(pool: sqlx::PgPool) {
+    let env = create_test_env(pool).await;
+    let os_id = create_os_with_artifacts(&env).await;
+
+    // Set then clear kernel's local_url.
+    env.api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id.clone()),
+                updates: vec![rpc::forge::ArtifactLocalUrlUpdate {
+                    name: "kernel".to_string(),
+                    local_url: Some("http://cache.local/kernel".to_string()),
+                }],
+            },
+        ))
+        .await
+        .unwrap();
+
+    let resp = env
+        .api
+        .set_operating_system_artifacts_local_url(tonic::Request::new(
+            rpc::forge::SetOperatingSystemArtifactsLocalUrlRequest {
+                id: Some(os_id),
+                updates: vec![rpc::forge::ArtifactLocalUrlUpdate {
+                    name: "kernel".to_string(),
+                    local_url: None, // clear it
+                }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(resp.artifacts[0].local_url.is_none());
 }
 
 #[crate::sqlx_test]

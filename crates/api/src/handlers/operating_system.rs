@@ -310,7 +310,9 @@ pub async fn update_operating_system(
         .as_deref()
         .or(existing.ipxe_template_name.as_deref());
 
-    let ipxe_definition_hash = if let Some(tmpl) = effective_template {
+    let ipxe_definition_hash = if let Some(provided_hash) = req.ipxe_definition_hash.as_deref() {
+        Some(provided_hash.to_owned())
+    } else if let Some(tmpl) = effective_template {
         let effective_params: Vec<rpc::IpxeOsParameter> = if !req.ipxe_parameters.is_empty() {
             req.ipxe_parameters.clone()
         } else {
@@ -326,15 +328,48 @@ pub async fn update_operating_system(
         None
     };
 
+    let hash_changed = match (&ipxe_definition_hash, &existing.ipxe_definition_hash) {
+        (Some(new_hash), Some(old_hash)) => new_hash != old_hash,
+        (Some(_), None) => true,
+        _ => false,
+    };
+
     let ipxe_parameters = if req.ipxe_parameters.is_empty() {
         None
     } else {
         Some(parameters_to_json(&req.ipxe_parameters))
     };
-    let ipxe_artifacts = if req.ipxe_artifacts.is_empty() {
-        None
+
+    let mut effective_artifacts_for_json = if !req.ipxe_artifacts.is_empty() {
+        req.ipxe_artifacts.clone()
     } else {
-        Some(artifacts_to_json(&req.ipxe_artifacts))
+        artifacts_from_json(existing.ipxe_artifacts.as_ref().map(|j| &j.0))
+    };
+
+    if hash_changed {
+        for a in &mut effective_artifacts_for_json {
+            a.local_url = None;
+        }
+    }
+
+    let ipxe_artifacts = if hash_changed || !req.ipxe_artifacts.is_empty() {
+        Some(artifacts_to_json(&effective_artifacts_for_json))
+    } else {
+        None
+    };
+
+    let status = if hash_changed {
+        let needs_local = effective_artifacts_for_json.iter().any(|a| {
+            // LOCAL_ONLY = 1, CACHED_ONLY = 2
+            a.cache_strategy == 1 || a.cache_strategy == 2
+        });
+        if needs_local {
+            Some("PROVISIONING".to_string())
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     let input = db::operating_system::UpdateOperatingSystem {
@@ -350,6 +385,7 @@ pub async fn update_operating_system(
         ipxe_parameters,
         ipxe_artifacts,
         ipxe_definition_hash,
+        status,
     };
 
     let row = db::operating_system::update(&mut txn, &existing, &input)
@@ -415,6 +451,134 @@ pub async fn find_operating_system_ids(
         .collect();
 
     Ok(Response::new(rpc::OperatingSystemIdList { ids }))
+}
+
+pub async fn get_operating_system_artifacts(
+    api: &Api,
+    request: Request<rpc::GetOperatingSystemArtifactsRequest>,
+) -> Result<Response<rpc::OperatingSystemArtifactsResponse>, Status> {
+    let mut txn = api.txn_begin().await?;
+    let req = request.into_inner();
+
+    let id_proto = req
+        .id
+        .ok_or_else(|| Status::invalid_argument("id is required"))?;
+    let id = Uuid::try_from(id_proto)
+        .map_err(|e| Status::invalid_argument(format!("invalid id: {e}")))?;
+
+    let row = db::operating_system::get(&mut txn, id).await.map_err(|e| {
+        if e.is_not_found() {
+            Status::not_found(format!("operating system {id} not found"))
+        } else {
+            Status::internal(e.to_string())
+        }
+    })?;
+    txn.commit()
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+    let artifacts = artifacts_from_json(row.ipxe_artifacts.as_ref().map(|j| &j.0));
+    Ok(Response::new(rpc::OperatingSystemArtifactsResponse {
+        artifacts,
+    }))
+}
+
+pub async fn set_operating_system_artifacts_local_url(
+    api: &Api,
+    request: Request<rpc::SetOperatingSystemArtifactsLocalUrlRequest>,
+) -> Result<Response<rpc::OperatingSystemArtifactsResponse>, Status> {
+    let mut txn = api.txn_begin().await?;
+    let req = request.into_inner();
+
+    let id_proto = req
+        .id
+        .ok_or_else(|| Status::invalid_argument("id is required"))?;
+    let id = Uuid::try_from(id_proto)
+        .map_err(|e| Status::invalid_argument(format!("invalid id: {e}")))?;
+
+    let existing = db::operating_system::get(&mut txn, id).await.map_err(|e| {
+        if e.is_not_found() {
+            Status::not_found(format!("operating system {id} not found"))
+        } else {
+            Status::internal(e.to_string())
+        }
+    })?;
+
+    let mut artifacts = artifacts_from_json(existing.ipxe_artifacts.as_ref().map(|j| &j.0));
+
+    // Occurrence-based ordered matching:
+    // Each update entry consumes the next unmatched artifact (in stored order) whose
+    // name matches case-insensitively. This means duplicate names in the OS require
+    // duplicate entries in the request to update all occurrences.
+    let mut consumed = vec![false; artifacts.len()];
+    for update in &req.updates {
+        let name_lower = update.name.to_lowercase();
+        let idx = consumed
+            .iter()
+            .zip(artifacts.iter())
+            .position(|(used, a)| !used && a.name.to_lowercase() == name_lower)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "artifact '{}' not found (or already matched) in operating system {id}",
+                    update.name,
+                ))
+            })?;
+        artifacts[idx].local_url = update.local_url.clone();
+        consumed[idx] = true;
+    }
+
+    // State transition: if the OS is not yet READY and every CACHED_ONLY artifact
+    // (cache_strategy == 2) now has a non-empty local_url, promote it to READY.
+    // LOCAL_ONLY artifacts are excluded from this check.
+    const CACHED_ONLY: i32 = 2;
+    let cached_only: Vec<_> = artifacts
+        .iter()
+        .filter(|a| a.cache_strategy == CACHED_ONLY)
+        .collect();
+    let new_status = if existing.status.to_uppercase() != "READY"
+        && !cached_only.is_empty()
+        && cached_only
+            .iter()
+            .all(|a| a.local_url.as_deref().is_some_and(|u| !u.is_empty()))
+    {
+        Some("READY".to_string())
+    } else {
+        None
+    };
+
+    let ipxe_artifacts = if artifacts.is_empty() {
+        None
+    } else {
+        Some(artifacts_to_json(&artifacts))
+    };
+
+    let input = db::operating_system::UpdateOperatingSystem {
+        id,
+        name: None,
+        description: None,
+        is_active: None,
+        allow_override: None,
+        phone_home_enabled: None,
+        user_data: None,
+        ipxe_script: None,
+        ipxe_template_name: None,
+        ipxe_parameters: None,
+        ipxe_artifacts,
+        ipxe_definition_hash: None,
+        status: new_status,
+    };
+
+    let row = db::operating_system::update(&mut txn, &existing, &input)
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+    txn.commit()
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+    let artifacts = artifacts_from_json(row.ipxe_artifacts.as_ref().map(|j| &j.0));
+    Ok(Response::new(rpc::OperatingSystemArtifactsResponse {
+        artifacts,
+    }))
 }
 
 pub async fn find_operating_systems_by_ids(

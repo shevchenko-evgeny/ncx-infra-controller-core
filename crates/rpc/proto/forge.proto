@@ -843,6 +843,11 @@ service Forge {
   rpc DeleteOperatingSystem(DeleteOperatingSystemRequest) returns (DeleteOperatingSystemResponse);
   rpc FindOperatingSystemIds(OperatingSystemSearchFilter) returns (OperatingSystemIdList);
   rpc FindOperatingSystemsByIds(OperatingSystemsByIdsRequest) returns (OperatingSystemList);
+  // Returns the ordered artifact list for an OS definition without fetching the full record.
+  rpc GetOperatingSystemArtifacts(GetOperatingSystemArtifactsRequest) returns (OperatingSystemArtifactsResponse);
+  // Updates the local_url field of named artifacts in-place, leaving all other artifact fields
+  // and OS definition fields (including ipxe_definition_hash) unchanged.
+  rpc SetOperatingSystemArtifactsLocalUrl(SetOperatingSystemArtifactsLocalUrlRequest) returns (OperatingSystemArtifactsResponse);
 }
 
 message AttestationIdsRequest {
@@ -7181,6 +7186,7 @@ message UpdateOperatingSystemRequest {
   optional string ipxe_template_name = 22;
   repeated IpxeOsParameter ipxe_parameters = 23;
   repeated IpxeOsArtifact ipxe_artifacts = 24;
+  optional string ipxe_definition_hash = 25; // if provided, used as-is; otherwise recomputed
 }
 
 message DeleteOperatingSystemRequest {
@@ -7203,4 +7209,24 @@ message OperatingSystemsByIdsRequest {
 
 message OperatingSystemList {
   repeated OperatingSystemDefinition operating_systems = 1;
+}
+
+message GetOperatingSystemArtifactsRequest {
+  common.UUID id = 1;
+}
+
+message OperatingSystemArtifactsResponse {
+  repeated IpxeOsArtifact artifacts = 1;
+}
+
+// A single (artifact name, local_url) pair for SetOperatingSystemArtifactsLocalUrl.
+// local_url is optional: absent means clear the local_url on the matching artifact(s).
+message ArtifactLocalUrlUpdate {
+  string name = 1;
+  optional string local_url = 2;
+}
+
+message SetOperatingSystemArtifactsLocalUrlRequest {
+  common.UUID id = 1;
+  repeated ArtifactLocalUrlUpdate updates = 2;
 }

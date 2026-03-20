@@ -279,6 +279,9 @@ pub struct UpdateOperatingSystem {
     pub ipxe_parameters: Option<serde_json::Value>,
     pub ipxe_artifacts: Option<serde_json::Value>,
     pub ipxe_definition_hash: Option<String>,
+    /// If Some, overrides the stored status string (e.g. "READY", "PROVISIONING").
+    /// If None, the existing status is preserved.
+    pub status: Option<String>,
 }
 
 pub async fn update(
@@ -305,6 +308,7 @@ pub async fn update(
         .ipxe_template_name
         .as_deref()
         .or(existing.ipxe_template_name.as_deref());
+    let status = input.status.as_deref().unwrap_or(&existing.status);
 
     let ipxe_parameters: Option<sqlx::types::Json<&serde_json::Value>> = input
         .ipxe_parameters
@@ -326,8 +330,8 @@ pub async fn update(
         name = $1, description = $2, is_active = $3, allow_override = $4,
         phone_home_enabled = $5, user_data = $6, ipxe_script = $7,
         ipxe_template_name = $8, ipxe_parameters = $9, ipxe_artifacts = $10,
-        ipxe_definition_hash = $11, updated = NOW()
-        WHERE id = $12 AND deleted IS NULL
+        ipxe_definition_hash = $11, status = $12, updated = NOW()
+        WHERE id = $13 AND deleted IS NULL
         RETURNING id, name, description, org, type, status, is_active, allow_override,
         phone_home_enabled, user_data, created, updated, deleted,
         ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash";
@@ -343,6 +347,7 @@ pub async fn update(
         .bind(ipxe_parameters)
         .bind(ipxe_artifacts)
         .bind(ipxe_definition_hash)
+        .bind(status)
         .bind(input.id)
         .fetch_one(txn)
         .await
