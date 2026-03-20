@@ -435,10 +435,15 @@ impl InternalRBACRules {
             "GetMachineValidationTests",
             vec![ForgeAdminCLI, SiteAgent, Agent, Scout],
         );
-        x.perm("AddMachineValidationTest", vec![ForgeAdminCLI, SiteAgent]);
+        // Quick fix: machine validation test command/args run via shell on the scout; add/update
+        // must stay disabled until input validation and execution are hardened (see Issues).
+        // Previous RBAC (restore only together with a proper fix):
+        // x.perm("AddMachineValidationTest", vec![ForgeAdminCLI, SiteAgent]);
+        // x.perm("UpdateMachineValidationTest", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm("AddMachineValidationTest", vec![]);
         x.perm(
             "UpdateMachineValidationTest",
-            vec![ForgeAdminCLI, SiteAgent],
+            vec![],
         );
         x.perm(
             "MachineValidationTestVerfied",
