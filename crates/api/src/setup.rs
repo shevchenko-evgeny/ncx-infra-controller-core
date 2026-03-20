@@ -48,6 +48,7 @@ use tracing_log::AsLog as _;
 use crate::api::Api;
 use crate::api::metrics::ApiMetricsEmitter;
 use crate::cfg::file::{CarbideConfig, ListenMode};
+use crate::dhcp_periodic_cleanup::DhcpPeriodicCleanup;
 use crate::dpa::handler::{DpaInfo, start_dpa_handler};
 use crate::dynamic_settings::DynamicSettings;
 use crate::errors::CarbideError;
@@ -977,6 +978,12 @@ pub async fn initialize_and_start_controllers(
         db_pool.clone(),
         carbide_config.machine_validation_config.clone(),
         meter.clone(),
+    )
+    .start(join_set, cancel_token.clone())?;
+
+    DhcpPeriodicCleanup::new(
+        db_pool.clone(),
+        carbide_config.dhcp_periodic_cleanup.clone(),
     )
     .start(join_set, cancel_token.clone())?;
 

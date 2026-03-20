@@ -71,10 +71,81 @@ pub async fn delete(
         .map_err(|e| DatabaseError::query(query, e))
 }
 
+/// delete_stale_allocations deletes IP address allocations for
+/// interfaces whose `last_dhcp` timestamp is older than `max_age`
+/// ago, scoped to the given network segment types. Used as part
+/// of our periodic cleanup.
+///
+/// When `include_associated` is false (default), only interfaces
+/// with no machine association (machine_id IS NULL) are targeted,
+/// since those are the primary source of leaked allocations.
+/// When true, all stale interfaces are eligible regardless of
+/// machine association.
+///
+/// Returns the number of address rows deleted.
+pub async fn delete_stale_allocations(
+    txn: &mut PgConnection,
+    max_age: std::time::Duration,
+    segment_types: &[NetworkSegmentType],
+    include_associated: bool,
+) -> Result<u64, DatabaseError> {
+    let unassociated_filter = if include_associated {
+        ""
+    } else {
+        "AND mi.machine_id IS NULL"
+    };
+    let query = format!(
+        "DELETE FROM machine_interface_addresses
+        WHERE interface_id IN (
+            SELECT mi.id FROM machine_interfaces mi
+            INNER JOIN network_segments ns ON ns.id = mi.segment_id
+            WHERE mi.last_dhcp IS NOT NULL
+              AND mi.last_dhcp < NOW() - $1::interval
+              AND ns.network_segment_type = ANY($2::network_segment_type_t[])
+              {unassociated_filter}
+        )"
+    );
+    let interval = pg_interval_from_duration(max_age);
+    sqlx::query(&query)
+        .bind(interval)
+        .bind(segment_types)
+        .execute(txn)
+        .await
+        .map(|r| r.rows_affected())
+        .map_err(|e| DatabaseError::query(&query, e))
+}
+
+fn pg_interval_from_duration(d: std::time::Duration) -> sqlx::postgres::types::PgInterval {
+    sqlx::postgres::types::PgInterval {
+        months: 0,
+        days: 0,
+        microseconds: d.as_micros() as i64,
+    }
+}
+
 #[derive(Debug, FromRow)]
 pub struct MachineInterfaceSearchResult {
     pub id: MachineInterfaceId,
     pub machine_id: Option<MachineId>,
     pub name: String,
     pub network_segment_type: NetworkSegmentType,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pg_interval_from_7_days() {
+        let interval = pg_interval_from_duration(std::time::Duration::from_secs(7 * 24 * 3600));
+        assert_eq!(interval.months, 0);
+        assert_eq!(interval.days, 0);
+        assert_eq!(interval.microseconds, 7 * 24 * 3600 * 1_000_000);
+    }
+
+    #[test]
+    fn pg_interval_from_zero() {
+        let interval = pg_interval_from_duration(std::time::Duration::ZERO);
+        assert_eq!(interval.microseconds, 0);
+    }
 }

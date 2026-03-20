@@ -72,6 +72,7 @@ mod cfg;
 mod credentials;
 mod db_init;
 mod dhcp;
+mod dhcp_periodic_cleanup;
 mod dpa;
 mod dpf;
 mod dynamic_settings;

@@ -269,6 +269,14 @@ pub struct CarbideConfig {
     #[serde(default)]
     pub machine_updater: MachineUpdater,
 
+    /// dhcp_periodic_cleanup is disabled by ::default(), and
+    /// by adding a config block and setting enable: true, you
+    /// will enable a default cleanup of IP address allocations
+    /// which haven't had a DHCP renewal occur in 7 days. This
+    /// can additional be configured here as well.
+    #[serde(default)]
+    pub dhcp_periodic_cleanup: DhcpPeriodicCleanupConfig,
+
     /// The maximum number of IDs allowed for find_(something)_by_ids APIs
     #[serde(default = "default_max_find_by_ids")]
     pub max_find_by_ids: u32,
@@ -2443,6 +2451,77 @@ impl MachineValidationConfig {
     }
 }
 
+/// DhcpPeriodicCleanupConfig is the config used to define
+/// periodic cleanup of stale DHCP IP allocations.
+/// https://github.com/NVIDIA/ncx-infra-controller-core/issues/662
+///
+/// When a machine interface has not renewed its DHCP lease within
+/// `max_age`, its IP address allocations are released back to the pool.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct DhcpPeriodicCleanupConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// run_interval controls how often the periodic
+    /// cleanup loop runs.
+    #[serde(
+        default = "DhcpPeriodicCleanupConfig::default_run_interval",
+        deserialize_with = "deserialize_duration",
+        serialize_with = "as_std_duration"
+    )]
+    pub run_interval: std::time::Duration,
+
+    /// max_age controls the max age of allocations. Allocations with
+    /// `last_dhcp` older than this are considered stale and released.
+    #[serde(
+        default = "DhcpPeriodicCleanupConfig::default_max_age",
+        deserialize_with = "deserialize_duration",
+        serialize_with = "as_std_duration"
+    )]
+    pub max_age: std::time::Duration,
+
+    /// segment_types controls which network segment types are
+    /// eligible for cleanup. Only interfaces on segments of
+    /// these types will have their stale allocations released.
+    #[serde(default = "DhcpPeriodicCleanupConfig::default_segment_types")]
+    pub segment_types: Vec<model::network_segment::NetworkSegmentType>,
+
+    /// include_associated controls whether interfaces that are
+    /// associated with a known machine (machine_id IS NOT NULL) are
+    /// eligible for cleanup. Defaults to false, meaning only
+    /// unassociated/anonymous interfaces are cleaned up.
+    #[serde(default)]
+    pub include_associated: bool,
+}
+
+impl Default for DhcpPeriodicCleanupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            run_interval: Self::default_run_interval(),
+            max_age: Self::default_max_age(),
+            segment_types: Self::default_segment_types(),
+            include_associated: false,
+        }
+    }
+}
+
+impl DhcpPeriodicCleanupConfig {
+    const fn default_run_interval() -> std::time::Duration {
+        // Default to running at 1 hour intervals.
+        std::time::Duration::from_secs(3600)
+    }
+
+    const fn default_max_age() -> std::time::Duration {
+        // Default to cleaning up stale allocations 7 days old.
+        std::time::Duration::from_secs(7 * 24 * 3600)
+    }
+
+    fn default_segment_types() -> Vec<model::network_segment::NetworkSegmentType> {
+        vec![model::network_segment::NetworkSegmentType::Underlay]
+    }
+}
+
 /// The VPC isolation behavior enforced within a site.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -4268,5 +4347,81 @@ firmware_url = "https://firmware.example.com/fw-b.bin"
             .unwrap();
 
         assert!(config.supernic_firmware_profiles.is_empty());
+    }
+
+    #[test]
+    fn dhcp_periodic_cleanup_config_defaults() {
+        let config: CarbideConfig = Figment::new()
+            .merge(Toml::file(format!("{TEST_DATA_DIR}/min_config.toml")))
+            .extract()
+            .unwrap();
+
+        assert!(!config.dhcp_periodic_cleanup.enabled);
+        assert_eq!(
+            config.dhcp_periodic_cleanup.run_interval,
+            std::time::Duration::from_secs(3600)
+        );
+        assert_eq!(
+            config.dhcp_periodic_cleanup.max_age,
+            std::time::Duration::from_secs(7 * 24 * 3600)
+        );
+        assert_eq!(
+            config.dhcp_periodic_cleanup.segment_types,
+            vec![model::network_segment::NetworkSegmentType::Underlay]
+        );
+        assert!(!config.dhcp_periodic_cleanup.include_associated);
+    }
+
+    #[test]
+    fn dhcp_periodic_cleanup_config_custom_values() {
+        let config = r#"{"enabled": true, "run_interval": "30m", "max_age": "14d", "segment_types": ["underlay", "admin"], "include_associated": true}"#;
+        let config: DhcpPeriodicCleanupConfig = serde_json::from_str(config).unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.run_interval, std::time::Duration::from_secs(30 * 60));
+        assert_eq!(
+            config.max_age,
+            std::time::Duration::from_secs(14 * 24 * 3600)
+        );
+        assert_eq!(
+            config.segment_types,
+            vec![
+                model::network_segment::NetworkSegmentType::Underlay,
+                model::network_segment::NetworkSegmentType::Admin,
+            ]
+        );
+        assert!(config.include_associated);
+    }
+
+    #[test]
+    fn dhcp_periodic_cleanup_config_serialize_roundtrip() {
+        let input = DhcpPeriodicCleanupConfig {
+            enabled: true,
+            run_interval: std::time::Duration::from_secs(1800),
+            max_age: std::time::Duration::from_secs(604800),
+            segment_types: vec![model::network_segment::NetworkSegmentType::Underlay],
+            include_associated: true,
+        };
+        let config_str = serde_json::to_string(&input).unwrap();
+        let config: DhcpPeriodicCleanupConfig = serde_json::from_str(&config_str).unwrap();
+        assert_eq!(config, input);
+    }
+
+    #[test]
+    fn dhcp_periodic_cleanup_config_partial_uses_defaults() {
+        let config = r#"{"max_age": "3d"}"#;
+        let config: DhcpPeriodicCleanupConfig = serde_json::from_str(config).unwrap();
+        assert!(!config.enabled);
+        assert_eq!(
+            config.run_interval,
+            DhcpPeriodicCleanupConfig::default_run_interval()
+        );
+        assert_eq!(
+            config.max_age,
+            std::time::Duration::from_secs(3 * 24 * 3600)
+        );
+        assert_eq!(
+            config.segment_types,
+            vec![model::network_segment::NetworkSegmentType::Underlay]
+        );
     }
 }

@@ -20,6 +20,7 @@ mod connected_device;
 mod create_domain;
 mod credential;
 mod desired_firmware_versions;
+mod dhcp_periodic_cleanup;
 mod dns;
 mod dpa_interfaces;
 mod dpf;

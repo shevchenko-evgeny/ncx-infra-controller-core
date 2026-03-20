@@ -85,9 +85,9 @@ use tracing_subscriber::EnvFilter;
 use crate::api::Api;
 use crate::api::metrics::ApiMetricsEmitter;
 use crate::cfg::file::{
-    BomValidationConfig, CarbideConfig, ComputeAllocationEnforcement, DpaConfig,
-    DpaInterfaceStateControllerConfig, DpuConfig as InitialDpuConfig, FirmwareGlobal, FnnConfig,
-    IBFabricConfig, IbFabricDefinition, IbPartitionStateControllerConfig, ListenMode,
+    BomValidationConfig, CarbideConfig, ComputeAllocationEnforcement, DhcpPeriodicCleanupConfig,
+    DpaConfig, DpaInterfaceStateControllerConfig, DpuConfig as InitialDpuConfig, FirmwareGlobal,
+    FnnConfig, IBFabricConfig, IbFabricDefinition, IbPartitionStateControllerConfig, ListenMode,
     MachineStateControllerConfig, MachineUpdater, MachineValidationConfig,
     MeasuredBootMetricsCollectorConfig, MqttAuthConfig, NetworkSecurityGroupConfig,
     NetworkSegmentStateControllerConfig, NvLinkConfig, PowerManagerOptions,
@@ -1213,6 +1213,7 @@ pub fn get_config() -> CarbideConfig {
         arm_pxe_boot_url_override: None,
         supernic_firmware_profiles: HashMap::default(),
         component_manager: None,
+        dhcp_periodic_cleanup: DhcpPeriodicCleanupConfig::default(),
     }
 }
 
