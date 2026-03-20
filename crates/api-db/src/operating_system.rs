@@ -278,6 +278,7 @@ pub struct UpdateOperatingSystem {
     pub ipxe_template_name: Option<String>,
     pub ipxe_parameters: Option<serde_json::Value>,
     pub ipxe_artifacts: Option<serde_json::Value>,
+    pub ipxe_definition_hash: Option<String>,
 }
 
 pub async fn update(
@@ -316,12 +317,17 @@ pub async fn update(
         .or(existing.ipxe_artifacts.as_ref().map(|j| &j.0))
         .map(|v| sqlx::types::Json(v));
 
+    let ipxe_definition_hash = input
+        .ipxe_definition_hash
+        .as_deref()
+        .or(existing.ipxe_definition_hash.as_deref());
+
     let query = "UPDATE operating_systems SET
         name = $1, description = $2, is_active = $3, allow_override = $4,
         phone_home_enabled = $5, user_data = $6, ipxe_script = $7,
         ipxe_template_name = $8, ipxe_parameters = $9, ipxe_artifacts = $10,
-        updated = NOW()
-        WHERE id = $11 AND deleted IS NULL
+        ipxe_definition_hash = $11, updated = NOW()
+        WHERE id = $12 AND deleted IS NULL
         RETURNING id, name, description, org, type, status, is_active, allow_override,
         phone_home_enabled, user_data, created, updated, deleted,
         ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash";
@@ -336,6 +342,7 @@ pub async fn update(
         .bind(ipxe_template_name)
         .bind(ipxe_parameters)
         .bind(ipxe_artifacts)
+        .bind(ipxe_definition_hash)
         .bind(input.id)
         .fetch_one(txn)
         .await

@@ -21,11 +21,12 @@ use uuid::Uuid;
 use crate::api::Api;
 use crate::api::rpc;
 
+/// Validates template requirements and returns the computed definition hash on success.
 fn validate_template_requirements(
     template_name: &str,
     params: &[rpc::IpxeOsParameter],
     artifacts: &[rpc::IpxeOsArtifact],
-) -> Result<(), Status> {
+) -> Result<String, Status> {
     use carbide_ipxe_renderer::IpxeOsRenderer;
 
     for (i, p) in params.iter().enumerate() {
@@ -52,12 +53,15 @@ fn validate_template_requirements(
     let renderer = carbide_ipxe_renderer::DefaultIpxeOsRenderer::new();
 
     let ipxeos = rpc_to_ipxe_os(template_name, params, artifacts);
-    let mut ipxeos_with_hash = ipxeos.clone();
-    ipxeos_with_hash.hash = renderer.hash(&ipxeos);
+    let hash = renderer.hash(&ipxeos);
+    let mut ipxeos_with_hash = ipxeos;
+    ipxeos_with_hash.hash = hash.clone();
 
     renderer
         .validate(&ipxeos_with_hash)
-        .map_err(|e| Status::invalid_argument(e.to_string()))
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+    Ok(hash)
 }
 
 fn rpc_to_ipxe_os(
@@ -183,11 +187,11 @@ pub async fn create_operating_system(
     let mut txn = api.txn_begin().await?;
     let req = request.into_inner();
 
-    let (type_, ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts) =
+    let (type_, ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash) =
         if let Some(ref script) = req.ipxe_script {
-            ("iPXE".to_string(), Some(script.clone()), None, None, None)
+            ("iPXE".to_string(), Some(script.clone()), None, None, None, None)
         } else if let Some(ref tmpl) = req.ipxe_template_name {
-            validate_template_requirements(tmpl, &req.ipxe_parameters, &req.ipxe_artifacts)?;
+            let hash = validate_template_requirements(tmpl, &req.ipxe_parameters, &req.ipxe_artifacts)?;
 
             let params = if req.ipxe_parameters.is_empty() {
                 None
@@ -205,6 +209,7 @@ pub async fn create_operating_system(
                 Some(tmpl.clone()),
                 params,
                 arts,
+                Some(hash),
             )
         } else {
             return Err(Status::invalid_argument(
@@ -240,7 +245,7 @@ pub async fn create_operating_system(
         ipxe_template_name,
         ipxe_parameters,
         ipxe_artifacts,
-        ipxe_definition_hash: None,
+        ipxe_definition_hash,
     };
 
     let row = db::operating_system::create(&mut txn, &input)
@@ -305,7 +310,7 @@ pub async fn update_operating_system(
         .as_deref()
         .or(existing.ipxe_template_name.as_deref());
 
-    if let Some(tmpl) = effective_template {
+    let ipxe_definition_hash = if let Some(tmpl) = effective_template {
         let effective_params: Vec<rpc::IpxeOsParameter> = if !req.ipxe_parameters.is_empty() {
             req.ipxe_parameters.clone()
         } else {
@@ -316,8 +321,10 @@ pub async fn update_operating_system(
         } else {
             artifacts_from_json(existing.ipxe_artifacts.as_ref().map(|j| &j.0))
         };
-        validate_template_requirements(tmpl, &effective_params, &effective_artifacts)?;
-    }
+        Some(validate_template_requirements(tmpl, &effective_params, &effective_artifacts)?)
+    } else {
+        None
+    };
 
     let ipxe_parameters = if req.ipxe_parameters.is_empty() {
         None
@@ -342,6 +349,7 @@ pub async fn update_operating_system(
         ipxe_template_name: req.ipxe_template_name,
         ipxe_parameters,
         ipxe_artifacts,
+        ipxe_definition_hash,
     };
 
     let row = db::operating_system::update(&mut txn, &existing, &input)

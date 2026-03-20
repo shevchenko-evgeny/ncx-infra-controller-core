@@ -270,4 +270,20 @@ async fn test_create_instance_with_ipxe_template_os(_: PgPoolOptions, options: P
         other => panic!("expected OperatingSystemId variant, got {other:?}"),
     }
     assert_eq!(os.user_data.as_deref(), Some("instance-userdata"));
+
+    // Verify that the boot flow renders the iPXE template correctly: fetch the PXE
+    // instructions for the machine's host interface and assert the script contains
+    // the parameter value provided via the raw-ipxe template.
+    let mut txn = env.pool.begin().await.unwrap();
+    let host_interface = mh.host().first_interface(&mut txn).await;
+    txn.rollback().await.unwrap();
+
+    let pxe = host_interface
+        .get_pxe_instructions(rpc::forge::MachineArchitecture::X86)
+        .await;
+    assert!(
+        pxe.pxe_script.contains("chain http://boot.example.com"),
+        "Expected rendered template to contain the iPXE parameter value, got: {}",
+        pxe.pxe_script
+    );
 }
