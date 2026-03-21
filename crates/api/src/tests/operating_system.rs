@@ -466,8 +466,8 @@ async fn create_os_with_artifacts(
                     local_url: None,
                 },
                 IpxeOsArtifact {
-                    name: "extra".to_string(),
-                    url: "http://example.com/extra".to_string(),
+                    name: "overlay".to_string(),
+                    url: "http://example.com/overlay".to_string(),
                     sha: None,
                     auth_type: None,
                     auth_token: None,
@@ -505,7 +505,7 @@ async fn test_get_operating_system_artifacts_returns_ordered_list(pool: sqlx::Pg
     assert_eq!(resp.artifacts.len(), 3);
     assert_eq!(resp.artifacts[0].name, "kernel");
     assert_eq!(resp.artifacts[1].name, "initrd");
-    assert_eq!(resp.artifacts[2].name, "extra");
+    assert_eq!(resp.artifacts[2].name, "overlay");
 }
 
 #[crate::sqlx_test]
@@ -555,7 +555,7 @@ async fn test_set_artifacts_local_url_partial_update(pool: sqlx::PgPool) {
         Some("http://cache.local/kernel")
     );
     assert!(resp.artifacts[1].local_url.is_none()); // initrd unchanged
-    assert!(resp.artifacts[2].local_url.is_none()); // extra unchanged
+    assert!(resp.artifacts[2].local_url.is_none()); // overlay unchanged
 }
 
 #[crate::sqlx_test]
@@ -690,7 +690,7 @@ async fn test_set_artifacts_transitions_to_ready_when_all_cached_only_set(pool: 
     let os_id = create_os_with_artifacts(&env).await;
 
     // Set local_url only for the two CACHED_ONLY artifacts; leave the
-    // CACHE_AS_NEEDED "extra" artifact untouched.
+    // CACHE_AS_NEEDED "overlay" artifact untouched.
     let _ = env
         .api
         .set_operating_system_artifacts_local_url(tonic::Request::new(
