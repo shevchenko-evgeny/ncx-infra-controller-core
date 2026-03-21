@@ -39,6 +39,7 @@ pub async fn update(opts: Args, api_client: &ApiClient) -> CarbideCliResult<()> 
             ipxe_template_name: opts.ipxe_template_name,
             ipxe_parameters: opts.params,
             ipxe_artifacts: vec![],
+            ipxe_definition_hash: None,
         })
         .await
         .map_err(CarbideCliError::from)?;

@@ -205,6 +205,7 @@ async fn test_update_operating_system(pool: sqlx::PgPool) {
             ipxe_template_name: None,
             ipxe_parameters: vec![],
             ipxe_artifacts: vec![],
+            ipxe_definition_hash: None,
         }))
         .await
         .unwrap()

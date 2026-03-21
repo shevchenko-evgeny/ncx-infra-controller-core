@@ -24,6 +24,9 @@ use carbide_ipxe_renderer::{ArtifactCacheStrategy, IpxeOsArtifact, IpxeOsParamet
 
 use crate::DatabaseError;
 
+pub const OS_STATUS_READY: &str = "READY";
+pub const OS_STATUS_PROVISIONING: &str = "PROVISIONING";
+
 fn ipxe_parameters_from_json(
     j: Option<&sqlx::types::Json<serde_json::Value>>,
 ) -> Vec<IpxeOsParameter> {
@@ -195,6 +198,7 @@ pub struct CreateOperatingSystem {
     pub description: Option<String>,
     pub org: String,
     pub type_: String,
+    pub status: String,
     pub is_active: bool,
     pub allow_override: bool,
     pub phone_home_enabled: bool,
@@ -212,9 +216,9 @@ pub async fn create(
 ) -> Result<OperatingSystem, DatabaseError> {
     let row = if let Some(id) = input.id {
         let query = "INSERT INTO operating_systems
-            (id, name, description, org, type, is_active, allow_override, phone_home_enabled, user_data,
+            (id, name, description, org, type, status, is_active, allow_override, phone_home_enabled, user_data,
              ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING id, name, description, org, type, status, is_active, allow_override,
             phone_home_enabled, user_data, created, updated, deleted,
             ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash";
@@ -224,6 +228,7 @@ pub async fn create(
             .bind(&input.description)
             .bind(&input.org)
             .bind(&input.type_)
+            .bind(&input.status)
             .bind(input.is_active)
             .bind(input.allow_override)
             .bind(input.phone_home_enabled)
@@ -238,9 +243,9 @@ pub async fn create(
             .map_err(|e| DatabaseError::query(query, e))?
     } else {
         let query = "INSERT INTO operating_systems
-            (name, description, org, type, is_active, allow_override, phone_home_enabled, user_data,
+            (name, description, org, type, status, is_active, allow_override, phone_home_enabled, user_data,
              ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING id, name, description, org, type, status, is_active, allow_override,
             phone_home_enabled, user_data, created, updated, deleted,
             ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash";
@@ -249,6 +254,7 @@ pub async fn create(
             .bind(&input.description)
             .bind(&input.org)
             .bind(&input.type_)
+            .bind(&input.status)
             .bind(input.is_active)
             .bind(input.allow_override)
             .bind(input.phone_home_enabled)

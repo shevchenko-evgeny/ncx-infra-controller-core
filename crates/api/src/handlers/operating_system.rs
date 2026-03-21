@@ -224,6 +224,15 @@ pub async fn create_operating_system(
         return Err(Status::invalid_argument("tenant_organization_id is required"));
     }
 
+    // READY by default, PROVISIONING if any artifact has CachedOnly strategy with empty local_url.
+    let status = if req.ipxe_artifacts.iter().any(|a| {
+        a.cache_strategy == 2 && a.local_url.as_deref().unwrap_or("").is_empty()
+    }) {
+        db::operating_system::OS_STATUS_PROVISIONING.to_string()
+    } else {
+        db::operating_system::OS_STATUS_READY.to_string()
+    };
+
     let id = req
         .id
         .as_ref()
@@ -237,6 +246,7 @@ pub async fn create_operating_system(
         description: req.description,
         org: req.tenant_organization_id,
         type_,
+        status,
         is_active: req.is_active,
         allow_override: req.allow_override,
         phone_home_enabled: req.phone_home_enabled,
@@ -364,7 +374,7 @@ pub async fn update_operating_system(
             a.cache_strategy == 1 || a.cache_strategy == 2
         });
         if needs_local {
-            Some("PROVISIONING".to_string())
+            Some(db::operating_system::OS_STATUS_PROVISIONING.to_string())
         } else {
             None
         }

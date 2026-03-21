@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS operating_systems (
     description             TEXT,
     org                     VARCHAR(256) NOT NULL,
     type                    VARCHAR(64) NOT NULL,
-    status                  VARCHAR(64) NOT NULL DEFAULT 'Provisioning',
+    status                  VARCHAR(64) NOT NULL DEFAULT 'PROVISIONING',
     is_active               BOOLEAN NOT NULL DEFAULT true,
     allow_override          BOOLEAN NOT NULL DEFAULT true,
     phone_home_enabled      BOOLEAN NOT NULL DEFAULT false,
