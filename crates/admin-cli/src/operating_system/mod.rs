@@ -18,6 +18,8 @@
 pub mod common;
 mod create;
 mod delete;
+mod get_artifacts;
+mod set_local_url;
 mod show;
 mod update;
 
@@ -36,4 +38,8 @@ pub enum Cmd {
     Update(update::Args),
     #[clap(about = "Delete an operating system definition.", visible_alias = "d")]
     Delete(delete::Args),
+    #[clap(about = "Get the artifact list for an OS definition.", visible_alias = "ga")]
+    GetArtifacts(get_artifacts::Args),
+    #[clap(about = "Set or clear local_url on OS artifacts.", visible_alias = "slu")]
+    SetLocalUrl(set_local_url::Args),
 }
