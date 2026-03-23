@@ -2825,7 +2825,7 @@ async fn handle_dpu_reprovision(
 
             // For Supermicro ARS-121L-DNR machines, perform DPU power cycle sequence
             // before powering the host back on.
-            if let Err(e) = reprovision_dpu_power_cycle_grace_grace(state, dpu_snapshot, ctx).await
+            if let Err(e) = reprovision_dpu_power_cycle_grace_grace(state, ctx).await
             {
                 return Ok(StateHandlerOutcome::wait(format!(
                     "DPU power cycle sequence failed for host {}: {e}",
@@ -3053,7 +3053,6 @@ async fn handle_dpu_reprovision(
 /// does not necessarily shutdown the DPU.
 async fn reprovision_dpu_power_cycle_grace_grace(
     state: &ManagedHostStateSnapshot,
-    dpu_snapshot: &Machine,
     ctx: &mut StateHandlerContext<'_, MachineStateHandlerContextObjects>,
 ) -> Result<(), StateHandlerError> {
     let is_grace_grace = state
