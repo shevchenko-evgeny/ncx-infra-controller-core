@@ -231,7 +231,7 @@ fn build_operating_system_for_snapshot(
         .clone()
         .or_else(|| os_row.user_data.clone());
     let variant = match os_row.type_.as_str() {
-        "iPXE" => {
+        model::operating_system_definition::OS_TYPE_IPXE => {
             let script = if os_row.allow_override && !pg_json.os_ipxe_script.is_empty() {
                 pg_json.os_ipxe_script.clone()
             } else {
@@ -241,7 +241,7 @@ fn build_operating_system_for_snapshot(
                 ipxe_script: script,
             })
         }
-        "ipxe_os_definition" => OperatingSystemVariant::OperatingSystemId(os_row.id),
+        model::operating_system_definition::OS_TYPE_IPXE_OS_DEFINITION => OperatingSystemVariant::OperatingSystemId(os_row.id),
         _ => {
             tracing::warn!(
                 os_id = %os_row.id,

@@ -24,6 +24,11 @@
 use ::rpc::forge::{self as forgerpc};
 use carbide_ipxe_renderer::{ArtifactCacheStrategy, IpxeOsArtifact, IpxeOsParameter};
 
+/// Database value for the raw inline iPXE script OS type.
+pub const OS_TYPE_IPXE: &str = "iPXE";
+/// Database value for the iPXE OS definition (template-based) OS type.
+pub const OS_TYPE_IPXE_OS_DEFINITION: &str = "ipxe_os_definition";
+
 /// Operating system definition (list/get/create/update response).
 ///
 /// Name matches the RPC message `rpc::forge::OperatingSystemDefinition`;
@@ -52,8 +57,8 @@ pub struct OperatingSystemDefinition {
 impl From<OperatingSystemDefinition> for forgerpc::OperatingSystemDefinition {
     fn from(m: OperatingSystemDefinition) -> Self {
         let os_type = match m.type_.as_str() {
-            "iPXE" => forgerpc::OperatingSystemType::OsTypeIpxe,
-            "ipxe_os_definition" => forgerpc::OperatingSystemType::OsTypeIpxeOsDefinition,
+            OS_TYPE_IPXE => forgerpc::OperatingSystemType::OsTypeIpxe,
+            OS_TYPE_IPXE_OS_DEFINITION => forgerpc::OperatingSystemType::OsTypeIpxeOsDefinition,
             _ => forgerpc::OperatingSystemType::OsTypeUnspecified,
         };
         Self {

@@ -36,10 +36,10 @@ use crate::CarbideError;
 fn operating_system_row_to_ipxe_os(
     row: &db::operating_system::OperatingSystem,
 ) -> Result<IpxeOs, CarbideError> {
-    if row.type_ != "ipxe_os_definition" {
+    if row.type_ != model::operating_system_definition::OS_TYPE_IPXE_OS_DEFINITION {
         return Err(CarbideError::internal(format!(
-            "operating_system {} has type {}, expected ipxe_os_definition",
-            row.id, row.type_
+            "operating_system {} has type {}, expected {}",
+            row.id, row.type_, model::operating_system_definition::OS_TYPE_IPXE_OS_DEFINITION,
         )));
     }
     let ipxe_template_name = row
@@ -499,7 +499,7 @@ exit ||
                             }
                             model::os::OperatingSystemVariant::OperatingSystemId(os_id) => {
                                 let row = db::operating_system::get(txn, os_id).await?;
-                                if row.type_ == "ipxe_os_definition" {
+                                if row.type_ == model::operating_system_definition::OS_TYPE_IPXE_OS_DEFINITION {
                                     let ipxeos = operating_system_row_to_ipxe_os(&row)?;
                                     Self::render_ipxe_os_definition(&ipxeos, "${base-url}", console)?
                                 } else {

@@ -189,7 +189,7 @@ pub async fn create_operating_system(
 
     let (type_, ipxe_script, ipxe_template_name, ipxe_parameters, ipxe_artifacts, ipxe_definition_hash) =
         if let Some(ref script) = req.ipxe_script {
-            ("iPXE".to_string(), Some(script.clone()), None, None, None, None)
+            (model::operating_system_definition::OS_TYPE_IPXE.to_string(), Some(script.clone()), None, None, None, None)
         } else if let Some(ref tmpl) = req.ipxe_template_name {
             let hash = validate_template_requirements(tmpl, &req.ipxe_parameters, &req.ipxe_artifacts)?;
 
@@ -204,7 +204,7 @@ pub async fn create_operating_system(
                 Some(artifacts_to_json(&req.ipxe_artifacts))
             };
             (
-                "ipxe_os_definition".to_string(),
+                model::operating_system_definition::OS_TYPE_IPXE_OS_DEFINITION.to_string(),
                 None,
                 Some(tmpl.clone()),
                 params,
