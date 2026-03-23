@@ -274,20 +274,18 @@ pub async fn get_operating_system(
     api: &Api,
     request: Request<::rpc::Uuid>,
 ) -> Result<Response<rpc::OperatingSystemDefinition>, Status> {
-    let mut txn = api.txn_begin().await?;
     let id = Uuid::try_from(request.into_inner())
         .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
-    let row = db::operating_system::get(&mut txn, id).await.map_err(|e| {
-        if e.is_not_found() {
-            Status::not_found(format!("operating system {id} not found"))
-        } else {
-            Status::internal(e.to_string())
-        }
-    })?;
-    txn.commit()
+    let row = db::operating_system::get(&mut api.db_reader(), id)
         .await
-        .map_err(|e| Status::internal(e.to_string()))?;
+        .map_err(|e| {
+            if e.is_not_found() {
+                Status::not_found(format!("operating system {id} not found"))
+            } else {
+                Status::internal(e.to_string())
+            }
+        })?;
 
     let def: rpc::OperatingSystemDefinition =
         model::operating_system_definition::OperatingSystemDefinition::from(&row).into();
@@ -443,15 +441,14 @@ pub async fn find_operating_system_ids(
     api: &Api,
     request: Request<rpc::OperatingSystemSearchFilter>,
 ) -> Result<Response<rpc::OperatingSystemIdList>, Status> {
-    let mut txn = api.txn_begin().await?;
     let filter = request.into_inner();
 
-    let ids = db::operating_system::list_ids(&mut txn, filter.tenant_organization_id.as_deref())
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-    txn.commit()
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
+    let ids = db::operating_system::list_ids(
+        &mut api.db_reader(),
+        filter.tenant_organization_id.as_deref(),
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))?;
 
     let ids = ids
         .into_iter()
@@ -467,7 +464,6 @@ pub async fn get_operating_system_artifacts(
     api: &Api,
     request: Request<rpc::GetOperatingSystemArtifactsRequest>,
 ) -> Result<Response<rpc::OperatingSystemArtifactsResponse>, Status> {
-    let mut txn = api.txn_begin().await?;
     let req = request.into_inner();
 
     let id_proto = req
@@ -476,16 +472,15 @@ pub async fn get_operating_system_artifacts(
     let id = Uuid::try_from(id_proto)
         .map_err(|e| Status::invalid_argument(format!("invalid id: {e}")))?;
 
-    let row = db::operating_system::get(&mut txn, id).await.map_err(|e| {
-        if e.is_not_found() {
-            Status::not_found(format!("operating system {id} not found"))
-        } else {
-            Status::internal(e.to_string())
-        }
-    })?;
-    txn.commit()
+    let row = db::operating_system::get(&mut api.db_reader(), id)
         .await
-        .map_err(|e| Status::internal(e.to_string()))?;
+        .map_err(|e| {
+            if e.is_not_found() {
+                Status::not_found(format!("operating system {id} not found"))
+            } else {
+                Status::internal(e.to_string())
+            }
+        })?;
 
     let artifacts = artifacts_from_json(row.ipxe_artifacts.as_ref().map(|j| &j.0));
     Ok(Response::new(rpc::OperatingSystemArtifactsResponse {
@@ -595,7 +590,6 @@ pub async fn find_operating_systems_by_ids(
     api: &Api,
     request: Request<rpc::OperatingSystemsByIdsRequest>,
 ) -> Result<Response<rpc::OperatingSystemList>, Status> {
-    let mut txn = api.txn_begin().await?;
     let req = request.into_inner();
 
     let ids: Vec<Uuid> = req
@@ -604,10 +598,7 @@ pub async fn find_operating_systems_by_ids(
         .filter_map(|u| Uuid::parse_str(&u.value).ok())
         .collect();
 
-    let rows = db::operating_system::get_many(&mut txn, &ids)
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-    txn.commit()
+    let rows = db::operating_system::get_many(&mut api.db_reader(), &ids)
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
 
