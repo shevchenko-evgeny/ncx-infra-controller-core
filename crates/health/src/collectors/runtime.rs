@@ -241,7 +241,7 @@ async fn run_iteration_with_auth_refresh<C: PeriodicCollector<BmcClient>>(
             })?;
 
             // We set credentials and wait till next iteration, to avoid credential fetch loop.
-            bmc.set_credentials(credentials.clone().into())
+            bmc.set_credentials(credentials.into())
                 .map_err(HealthError::GenericError)?;
             Err(error)
         }
