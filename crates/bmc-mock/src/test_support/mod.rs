@@ -50,7 +50,7 @@ pub type TestBmc = HttpBmc<AxumRouterHttpClient>;
 fn test_bmc(router: axum::Router) -> Arc<TestBmc> {
     let client = AxumRouterHttpClient::new(router);
     let endpoint = Url::parse("https://bmc-mock.local").expect("valid URL");
-    let credentials = BmcCredentials::new("root".to_string(), "password".to_string());
+    let credentials = BmcCredentials::new("root".to_string(), Some("password".to_string()));
     Arc::new(HttpBmc::new(
         client,
         endpoint,
@@ -143,7 +143,7 @@ mod test {
         let response: serde_json::Value = client
             .get(
                 url,
-                &BmcCredentials::new("root".to_string(), "password".to_string()),
+                &BmcCredentials::new("root".to_string(), Some("password".to_string())),
                 None,
                 &axum::http::HeaderMap::new(),
             )
@@ -168,7 +168,7 @@ mod test {
         let err = client
             .get::<serde_json::Value>(
                 url,
-                &BmcCredentials::new("root".to_string(), "password".to_string()),
+                &BmcCredentials::new("root".to_string(), Some("password".to_string())),
                 None,
                 &axum::http::HeaderMap::new(),
             )
