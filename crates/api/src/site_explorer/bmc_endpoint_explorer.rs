@@ -710,23 +710,26 @@ impl EndpointExplorer for BmcEndpointExplorer {
                 // using the Vendor details we found here (either changing from the
                 // expected defaults, or taking whatever was in Vault and potentially
                 // re-writing it with something new).
-                let (username, password) =
-                    match self.get_bmc_root_credentials(bmc_mac_address).await {
-                        Ok(Credentials::UsernamePassword { username, password }) => {
-                            (username, password)
+                let (username, password) = match self
+                    .get_bmc_root_credentials(bmc_mac_address)
+                    .await
+                {
+                    Ok(Credentials::UsernamePassword { username, password }) => {
+                        (username, password)
+                    }
+                    Err(_) => {
+                        if let Some(eps) = expected_power_shelf {
+                            (eps.bmc_username.clone(), eps.bmc_password.clone())
+                        } else if let Some(es) = expected_switch {
+                            (es.bmc_username.clone(), es.bmc_password.clone())
+                        } else if let Some(em) = expected_machine {
+                            (em.data.bmc_username.clone(), em.data.bmc_password.clone())
+                        } else {
+                            tracing::debug!(%bmc_ip_address, "No credentials available for Lite-On workaround, returning original probe error");
+                            return Err(e);
                         }
-                        Err(_) => {
-                            if let Some(eps) = expected_power_shelf {
-                                (eps.bmc_username.clone(), eps.bmc_password.clone())
-                            } else if let Some(es) = expected_switch {
-                                (es.bmc_username.clone(), es.bmc_password.clone())
-                            } else if let Some(em) = expected_machine {
-                                (em.data.bmc_username.clone(), em.data.bmc_password.clone())
-                            } else {
-                                return Err(e);
-                            }
-                        }
-                    };
+                    }
+                };
 
                 // Lite-On power shelf BMCs use "chassis" as their Chassis ID,
                 // so that's the one we'll need to collect data from (we actually
