@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 use ::rpc::errors::RpcDataConversionError;
 use ::rpc::forge as rpc;
+use carbide_uuid::rack::RackId;
 use carbide_uuid::switch::SwitchId;
 use chrono::prelude::*;
 use config_version::{ConfigVersion, Versioned};
@@ -29,6 +30,7 @@ use sqlx::{FromRow, Row};
 
 use crate::StateSla;
 use crate::controller_outcome::PersistentStateHandlerOutcome;
+use crate::health::HealthReportSources;
 use crate::metadata::Metadata;
 
 pub mod slas;
@@ -40,6 +42,9 @@ pub struct NewSwitch {
     pub config: SwitchConfig,
     pub bmc_mac_address: Option<MacAddress>,
     pub metadata: Option<Metadata>,
+    pub rack_id: Option<RackId>,
+    pub slot_number: Option<i32>,
+    pub tray_index: Option<i32>,
 }
 
 impl TryFrom<rpc::SwitchCreationRequest> for NewSwitch {
@@ -69,11 +74,16 @@ impl TryFrom<rpc::SwitchCreationRequest> for NewSwitch {
             None => uuid::Uuid::new_v4().into(),
         };
 
+        let config = SwitchConfig::try_from(conf)?;
+
         Ok(NewSwitch {
             id,
-            config: SwitchConfig::try_from(conf)?,
+            config,
             bmc_mac_address: None,
             metadata: None,
+            rack_id: None,
+            slot_number: value.placement_in_rack.as_ref().and_then(|p| p.slot_number),
+            tray_index: value.placement_in_rack.as_ref().and_then(|p| p.tray_index),
         })
     }
 }
@@ -83,7 +93,6 @@ pub struct SwitchConfig {
     pub name: String,
     pub enable_nmxc: bool,
     pub fabric_manager_config: Option<FabricManagerConfig>,
-    pub location: Option<String>, // Physical location
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,16 +115,7 @@ pub struct SwitchReprovisionRequest {
     pub initiator: String,
 }
 
-/// Status of the firmware upgrade during ReProvisioning. Set by an external entity (e.g. switch
-/// firmware updater). WaitFirmwareUpdateCompletion waits for Completed or Failed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FirmwareUpgradeStatus {
-    Started,
-    InProgress,
-    Completed,
-    Failed { cause: String },
-}
+pub use crate::rack::{RackFirmwareUpgradeState, RackFirmwareUpgradeStatus};
 
 #[derive(Debug, Clone)]
 pub struct Switch {
@@ -136,14 +136,19 @@ pub struct Switch {
     /// When set, the state controller (in Ready) transitions to ReProvisioning::Start.
     pub switch_reprovisioning_requested: Option<SwitchReprovisionRequest>,
 
-    /// Firmware upgrade status during ReProvisioning. WaitFirmwareUpdateCompletion polls this;
-    /// when Completed, transition to Ready; when Failed, transition to Error.
-    pub firmware_upgrade_status: Option<FirmwareUpgradeStatus>,
+    /// Firmware upgrade status during ReProvisioning, set by the rack state machine.
+    pub firmware_upgrade_status: Option<RackFirmwareUpgradeStatus>,
+
+    /// The rack that this switch is associated with.
+    pub rack_id: Option<RackId>,
     // Columns for these exist, but are unused in rust code
     // pub created: DateTime<Utc>,
     // pub updated: DateTime<Utc>,
     pub metadata: Metadata,
     pub version: ConfigVersion,
+    pub slot_number: Option<i32>,
+    pub tray_index: Option<i32>,
+    pub health_reports: HealthReportSources,
 }
 
 impl<'r> FromRow<'r, PgRow> for Switch {
@@ -156,9 +161,14 @@ impl<'r> FromRow<'r, PgRow> for Switch {
             row.try_get("controller_state_outcome").ok();
         let switch_reprovisioning_requested: Option<sqlx::types::Json<SwitchReprovisionRequest>> =
             row.try_get("switch_reprovisioning_requested").ok();
-        let firmware_upgrade_status: Option<sqlx::types::Json<FirmwareUpgradeStatus>> =
+        let firmware_upgrade_status: Option<sqlx::types::Json<RackFirmwareUpgradeStatus>> =
             row.try_get("firmware_upgrade_status").ok();
 
+        // DB column is still named "health_report_overrides" for backward compatibility.
+        let health_reports: HealthReportSources = row
+            .try_get::<sqlx::types::Json<HealthReportSources>, _>("health_report_overrides")
+            .map(|j| j.0)
+            .unwrap_or_default();
         let labels: sqlx::types::Json<HashMap<String, String>> = row.try_get("labels")?;
         let metadata = Metadata {
             name: row.try_get("name")?,
@@ -180,6 +190,10 @@ impl<'r> FromRow<'r, PgRow> for Switch {
             firmware_upgrade_status: firmware_upgrade_status.map(|j| j.0),
             metadata,
             version: row.try_get("version")?,
+            rack_id: row.try_get("rack_id").ok().flatten(),
+            slot_number: row.try_get("slot_number").ok().flatten(),
+            tray_index: row.try_get("tray_index").ok().flatten(),
+            health_reports,
         })
     }
 }
@@ -194,9 +208,20 @@ impl TryFrom<rpc::SwitchConfig> for SwitchConfig {
             fabric_manager_config: Some(FabricManagerConfig {
                 config_map: conf.fabric_manager_config.unwrap_or_default().config_map,
             }),
-            location: conf.location,
         })
     }
+}
+
+fn derive_switch_aggregate_health(sources: &HealthReportSources) -> health_report::HealthReport {
+    if let Some(replace) = &sources.replace {
+        return replace.clone();
+    }
+    let mut output = health_report::HealthReport::empty("switch-aggregate-health".to_string());
+    for report in sources.merges.values() {
+        output.merge(report);
+    }
+    output.observed_at = Some(chrono::Utc::now());
+    output
 }
 
 impl TryFrom<Switch> for rpc::Switch {
@@ -205,6 +230,7 @@ impl TryFrom<Switch> for rpc::Switch {
     fn try_from(src: Switch) -> Result<Self, Self::Error> {
         let state_reason = src.controller_state_outcome.map(|r| r.into());
         let sla = state_sla(&src.controller_state.value, &src.controller_state.version).into();
+        let controller_state = serde_json::to_string(&src.controller_state.value).unwrap();
         let status = Some(match src.status {
             Some(s) => rpc::SwitchStatus {
                 state_reason,
@@ -212,6 +238,7 @@ impl TryFrom<Switch> for rpc::Switch {
                 switch_name: Some(s.switch_name),
                 power_state: Some(s.power_state),
                 health_status: Some(s.health_status),
+                controller_state: Some(controller_state.clone()),
             },
             None => rpc::SwitchStatus {
                 state_reason,
@@ -219,9 +246,14 @@ impl TryFrom<Switch> for rpc::Switch {
                 switch_name: None,
                 power_state: None,
                 health_status: None,
+                controller_state: Some(controller_state.clone()),
             },
         });
 
+        let placement_in_rack = Some(rpc::PlacementInRack {
+            slot_number: src.slot_number,
+            tray_index: src.tray_index,
+        });
         let config = rpc::SwitchConfig {
             name: src.config.name,
             fabric_manager_config: Some(rpc::FabricManagerConfig {
@@ -232,16 +264,24 @@ impl TryFrom<Switch> for rpc::Switch {
                     .config_map,
             }),
             enable_nmxc: src.config.enable_nmxc,
-            location: src.config.location,
         };
 
+        let health = derive_switch_aggregate_health(&src.health_reports);
+        let health_sources = src
+            .health_reports
+            .clone()
+            .into_iter()
+            .map(|(hr, m)| rpc::HealthSourceOrigin {
+                mode: m as i32,
+                source: hr.source,
+            })
+            .collect();
         let deleted = if src.deleted.is_some() {
             Some(src.deleted.unwrap().into())
         } else {
             None
         };
         let state_version = src.controller_state.version.to_string();
-        let controller_state = serde_json::to_string(&src.controller_state.value).unwrap();
         Ok(rpc::Switch {
             id: Some(src.id),
             config: Some(config),
@@ -252,6 +292,10 @@ impl TryFrom<Switch> for rpc::Switch {
             state_version,
             metadata: Some(src.metadata.into()),
             version: src.version.version_string(),
+            rack_id: src.rack_id,
+            placement_in_rack,
+            health: Some(health.into()),
+            health_sources,
         })
     }
 }
@@ -284,10 +328,9 @@ pub enum BomValidatingState {
 /// Sub-state for SwitchControllerState::ReProvisioning
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReProvisioningState {
-    /// Re-provisioning has been started.
-    Start,
-    /// Waiting for firmware update to complete.
-    WaitFirmwareUpdateCompletion,
+    /// Rack-level firmware upgrade in progress; the rack state machine manages the
+    /// upgrade and clears `switch_reprovisioning_requested` when done.
+    WaitingForRackFirmwareUpgrade,
 }
 
 /// State of a Switch as tracked by the controller
@@ -361,28 +404,28 @@ pub fn state_sla(state: &SwitchControllerState, state_version: &ConfigVersion) -
     }
 }
 
-/// History of Switch states for a single Switch
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SwitchStateHistoryRecord {
-    /// The state that was entered
-    pub state: String,
-    // The version number associated with the state change
-    pub state_version: ConfigVersion,
-}
-
-impl From<SwitchStateHistoryRecord> for rpc::SwitchStateHistoryRecord {
-    fn from(value: SwitchStateHistoryRecord) -> rpc::SwitchStateHistoryRecord {
-        rpc::SwitchStateHistoryRecord {
-            state: value.state,
-            version: value.state_version.version_string(),
-            time: Some(value.state_version.timestamp().into()),
-        }
-    }
-}
-
 impl Switch {
     pub fn is_marked_as_deleted(&self) -> bool {
         self.deleted.is_some()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SwitchSearchFilter {
+    pub rack_id: Option<RackId>,
+    pub deleted: crate::DeletedFilter,
+    pub controller_state: Option<String>,
+    pub bmc_mac: Option<MacAddress>,
+}
+
+impl From<rpc::SwitchSearchFilter> for SwitchSearchFilter {
+    fn from(filter: rpc::SwitchSearchFilter) -> Self {
+        SwitchSearchFilter {
+            rack_id: filter.rack_id,
+            deleted: crate::DeletedFilter::from(filter.deleted),
+            controller_state: filter.controller_state,
+            bmc_mac: filter.bmc_mac.and_then(|m| m.parse::<MacAddress>().ok()),
+        }
     }
 }
 
@@ -399,7 +442,6 @@ mod tests {
                 name: "test-switch".to_string(),
                 enable_nmxc: false,
                 fabric_manager_config: None,
-                location: Some("test-location".to_string()),
             },
             status: Some(SwitchStatus {
                 switch_name: "test-switch".to_string(),
@@ -419,6 +461,10 @@ mod tests {
             firmware_upgrade_status: None,
             metadata: Metadata::default(),
             version: ConfigVersion::initial(),
+            rack_id: None,
+            slot_number: Some(1),
+            tray_index: Some(2),
+            health_reports: Default::default(),
         };
 
         let rpc_switch: rpc::Switch = switch.try_into().unwrap();
@@ -440,7 +486,6 @@ mod tests {
                 name: "test-switch".to_string(),
                 enable_nmxc: false,
                 fabric_manager_config: None,
-                location: None,
             },
             status: None,
             deleted: None,
@@ -457,6 +502,10 @@ mod tests {
             firmware_upgrade_status: None,
             metadata: Metadata::default(),
             version: ConfigVersion::initial(),
+            rack_id: None,
+            slot_number: None,
+            tray_index: None,
+            health_reports: Default::default(),
         };
 
         let rpc_switch: rpc::Switch = switch.try_into().unwrap();

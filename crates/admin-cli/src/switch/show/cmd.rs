@@ -15,12 +15,16 @@
  * limitations under the License.
  */
 
+use std::str::FromStr;
+
+use carbide_uuid::switch::SwitchId;
 use color_eyre::Result;
 use prettytable::{Table, row};
 use rpc::admin_cli::{CarbideCliResult, OutputFormat};
 use rpc::forge::Switch;
 
 use super::args::Args;
+use crate::cfg::runtime::RuntimeConfig;
 use crate::rpc::ApiClient;
 
 pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Result<()> {
@@ -31,7 +35,8 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
                 "ID",
                 "Name",
                 "Metadata Name",
-                "Location",
+                "Slot",
+                "Tray",
                 "Power State",
                 "Health",
                 "State"
@@ -56,11 +61,19 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
                     .map(|m| m.name.as_str())
                     .unwrap_or("N/A");
 
-                let location = switch
-                    .config
+                let slot_number = switch
+                    .placement_in_rack
                     .as_ref()
-                    .and_then(|config| config.location.as_deref())
-                    .unwrap_or("N/A");
+                    .and_then(|p| p.slot_number)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "N/A".to_string());
+
+                let tray_index = switch
+                    .placement_in_rack
+                    .as_ref()
+                    .and_then(|p| p.tray_index)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "N/A".to_string());
 
                 let power_state = switch
                     .status
@@ -78,7 +91,8 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
                     id,
                     name,
                     metadata_name,
-                    location,
+                    slot_number,
+                    tray_index,
                     power_state,
                     health,
                     switch.controller_state,
@@ -101,7 +115,8 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
                 "ID",
                 "Name",
                 "Metadata Name",
-                "Location",
+                "Slot",
+                "Tray",
                 "Power State",
                 "Health",
                 "State"
@@ -126,11 +141,19 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
                     .map(|m| m.name.as_str())
                     .unwrap_or("N/A");
 
-                let location = switch
-                    .config
+                let slot_number = switch
+                    .placement_in_rack
                     .as_ref()
-                    .and_then(|config| config.location.as_deref())
-                    .unwrap_or("N/A");
+                    .and_then(|p| p.slot_number)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "N/A".to_string());
+
+                let tray_index = switch
+                    .placement_in_rack
+                    .as_ref()
+                    .and_then(|p| p.tray_index)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "N/A".to_string());
 
                 let power_state = switch
                     .status
@@ -148,7 +171,8 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
                     id,
                     name,
                     metadata_name,
-                    location,
+                    slot_number,
+                    tray_index,
                     power_state,
                     health,
                     switch.controller_state,
@@ -164,12 +188,30 @@ pub fn show_switches(switches: Vec<Switch>, output_format: OutputFormat) -> Resu
 
 pub async fn handle_show(
     args: Args,
-    output_format: OutputFormat,
     api_client: &ApiClient,
+    config: &RuntimeConfig,
 ) -> CarbideCliResult<()> {
-    let response = api_client.0.find_switches(args).await?;
-    let switches = response.switches;
+    let switches = match args.identifier {
+        Some(id) if !id.is_empty() => match SwitchId::from_str(&id) {
+            Ok(switch_id) => api_client.get_one_switch(switch_id).await?.switches,
+            Err(_) => {
+                // Fall back to name-based lookup
+                let query = rpc::forge::SwitchQuery {
+                    name: Some(id),
+                    switch_id: None,
+                };
+                api_client.0.find_switches(query).await?.switches
+            }
+        },
+        _ => {
+            let filter = rpc::forge::SwitchSearchFilter::default();
+            api_client
+                .get_all_switches(filter, config.page_size)
+                .await?
+                .switches
+        }
+    };
 
-    show_switches(switches, output_format).ok();
+    show_switches(switches, config.format).ok();
     Ok(())
 }
