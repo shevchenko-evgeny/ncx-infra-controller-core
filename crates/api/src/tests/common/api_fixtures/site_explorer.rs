@@ -20,11 +20,15 @@ use std::iter;
 use std::net::IpAddr;
 
 use carbide_uuid::machine::MachineId;
+use carbide_uuid::machine_validation::MachineValidationId;
 use carbide_uuid::power_shelf::{PowerShelfId, PowerShelfIdSource, PowerShelfType};
 use carbide_uuid::rack::{RackId, RackProfileId};
 use carbide_uuid::switch::SwitchId;
 use db::machine_interface::find_by_mac_address;
-use db::{DatabaseError, power_shelf as db_power_shelf, rack as db_rack, switch as db_switch};
+use db::{
+    DatabaseError, expected_machine as db_expected_machine, power_shelf as db_power_shelf,
+    rack as db_rack, switch as db_switch,
+};
 use forge_secrets::credentials::{BmcCredentialType, CredentialKey, Credentials};
 use futures_util::FutureExt;
 use health_report::HealthReport;
@@ -35,7 +39,8 @@ use model::machine::health_override::HARDWARE_HEALTH_OVERRIDE_PREFIX;
 use model::machine::{
     BomValidating, BomValidatingContext, DpfState, DpuInitState, FailureCause, FailureDetails,
     FailureSource, LockdownInfo, LockdownMode, LockdownState, MachineState, MachineValidatingState,
-    ManagedHostState, ManagedHostStateSnapshot, MeasuringState, ValidationState,
+    ManagedHostState, ManagedHostStateSnapshot, MeasuringState, SpdmMeasuringState,
+    ValidationState,
 };
 use model::power_shelf::power_shelf_id::from_hardware_info;
 use model::power_shelf::{NewPowerShelf, PowerShelfConfig};
@@ -43,8 +48,8 @@ use model::rack::RackConfig;
 use model::site_explorer::EndpointExplorationReport;
 use model::switch::{NewSwitch, SwitchConfig};
 use rpc::forge::forge_server::Forge;
-use rpc::forge::{self, HealthReportEntry, InsertHealthReportOverrideRequest};
-use rpc::forge_agent_control_response::Action;
+use rpc::forge::{self, HealthReportEntry, InsertMachineHealthReportRequest};
+use rpc::forge_agent_control_response::{Action, LegacyAction};
 use rpc::machine_discovery::AttestKeyInfo;
 use rpc::{DiscoveryData, DiscoveryInfo};
 use sqlx::PgConnection;
@@ -394,9 +399,10 @@ impl<'a> MockExploredHost<'a> {
 
         for machine_id in self.dpu_machine_ids.values() {
             let response = forge_agent_control(self.test_env, *machine_id).await;
+            assert!(matches!(response.action, Some(Action::Discovery(_))));
             assert_eq!(
-                response.action,
-                rpc::forge_agent_control_response::Action::Discovery as i32
+                response.legacy_action,
+                rpc::forge_agent_control_response::LegacyAction::Discovery as i32
             );
 
             discovery_completed(self.test_env, *machine_id).await;
@@ -483,9 +489,10 @@ impl<'a> MockExploredHost<'a> {
 
         for machine_id in self.dpu_machine_ids.values() {
             let response = forge_agent_control(self.test_env, *machine_id).await;
+            assert!(matches!(response.action, Some(Action::Discovery(_)),));
             assert_eq!(
-                response.action,
-                rpc::forge_agent_control_response::Action::Discovery as i32
+                response.legacy_action,
+                rpc::forge_agent_control_response::LegacyAction::Discovery as i32
             );
 
             discovery_completed(self.test_env, *machine_id).await;
@@ -649,10 +656,29 @@ impl<'a> MockExploredHost<'a> {
             inject_machine_measurements(self.test_env, host_machine_id).await;
         }
 
+        // if SPDM attestation is enabled, we need to drive it to completion
+        if self.test_env.config.spdm.enabled {
+            self.test_env
+                .run_machine_state_controller_iteration_until_state_matches(
+                    &host_machine_id,
+                    10,
+                    ManagedHostState::HostInit {
+                        machine_state: MachineState::SpdmMeasuring {
+                            spdm_measuring_state: SpdmMeasuringState::PollResult,
+                        },
+                    },
+                )
+                .await;
+
+            for _ in 0..10 {
+                self.test_env.run_spdm_controller_iteration().await;
+            }
+        }
+
         self.test_env
             .run_machine_state_controller_iteration_until_state_matches(
                 &host_machine_id,
-                10,
+                20,
                 ManagedHostState::HostInit {
                     machine_state: MachineState::WaitingForDiscovery,
                 },
@@ -661,7 +687,7 @@ impl<'a> MockExploredHost<'a> {
 
         self.test_env
             .api
-            .insert_health_report_override(Request::new(InsertHealthReportOverrideRequest {
+            .insert_machine_health_report(Request::new(InsertMachineHealthReportRequest {
                 health_report_entry: Some(HealthReportEntry {
                     report: Some(
                         HealthReport::empty(format!("{HARDWARE_HEALTH_OVERRIDE_PREFIX}health"))
@@ -682,7 +708,7 @@ impl<'a> MockExploredHost<'a> {
             .test_env
             .run_machine_state_controller_iteration_until_state_condition(
                 &host_machine_id,
-                10,
+                15,
                 |machine| {
                     machine.current_state() == &expected_state
                         || matches!(
@@ -824,9 +850,10 @@ impl<'a> MockExploredHost<'a> {
         }
 
         let response = forge_agent_control(self.test_env, host_machine_id).await;
+        assert!(matches!(response.action, Some(Action::Noop(_))));
         assert_eq!(
-            response.action,
-            rpc::forge_agent_control_response::Action::Noop as i32
+            response.legacy_action,
+            rpc::forge_agent_control_response::LegacyAction::Noop as i32
         );
 
         self.test_env
@@ -884,7 +911,7 @@ impl<'a> MockExploredHost<'a> {
 
         self.test_env
             .api
-            .insert_health_report_override(Request::new(InsertHealthReportOverrideRequest {
+            .insert_machine_health_report(Request::new(InsertMachineHealthReportRequest {
                 health_report_entry: Some(HealthReportEntry {
                     report: Some(
                         HealthReport::empty(format!("{HARDWARE_HEALTH_OVERRIDE_PREFIX}health"))
@@ -932,7 +959,7 @@ impl<'a> MockExploredHost<'a> {
                     validation_state: ValidationState::MachineValidation {
                         machine_validation: MachineValidatingState::MachineValidating {
                             context: "Discovery".to_string(),
-                            id: uuid::Uuid::default(),
+                            id: MachineValidationId::new(),
                             completed: 1,
                             total: 1,
                             is_enabled: self.test_env.config.machine_validation_config.enabled,
@@ -945,12 +972,10 @@ impl<'a> MockExploredHost<'a> {
         let response = forge_agent_control(self.test_env, host_machine_id).await;
         if self.test_env.config.machine_validation_config.enabled {
             let uuid = &response.data.unwrap().pair[1].value;
-            let validation_id = Some(rpc::Uuid {
-                value: uuid.to_owned(),
-            });
+            let validation_id: MachineValidationId = uuid.parse().unwrap();
             let success = update_machine_validation_run(
                 self.test_env,
-                validation_id.clone(),
+                Some(validation_id),
                 Some(rpc::Duration::from(std::time::Duration::from_secs(1200))),
                 1,
             )
@@ -958,13 +983,13 @@ impl<'a> MockExploredHost<'a> {
             assert_eq!(success.message, "Success".to_string());
             let runs = get_machine_validation_runs(self.test_env, &host_machine_id, false).await;
             for run in runs.runs {
-                if run.validation_id == validation_id {
+                if run.validation_id == Some(validation_id) {
                     assert_eq!(run.status.unwrap_or_default().total, 1);
                     assert_eq!(run.status.unwrap_or_default().completed_tests, 0);
                     assert_eq!(run.duration_to_complete.unwrap_or_default().seconds, 1200);
                 }
             }
-            machine_validation_result.validation_id = validation_id.clone();
+            machine_validation_result.validation_id = Some(validation_id);
             persist_machine_validation_result(self.test_env, machine_validation_result.clone())
                 .await;
             assert_eq!(
@@ -979,7 +1004,7 @@ impl<'a> MockExploredHost<'a> {
 
             let runs = get_machine_validation_runs(self.test_env, &host_machine_id, false).await;
             for run in runs.runs {
-                if run.validation_id == validation_id {
+                if run.validation_id == Some(validation_id) {
                     assert_eq!(run.status.unwrap_or_default().total, 1);
                     assert_eq!(
                         run.status.unwrap_or_default().completed_tests,
@@ -1030,7 +1055,8 @@ impl<'a> MockExploredHost<'a> {
                     .await;
 
                 let response = forge_agent_control(self.test_env, host_machine_id).await;
-                assert_eq!(response.action, Action::Noop as i32);
+                assert!(matches!(response.action, Some(Action::Noop(_))));
+                assert_eq!(response.legacy_action, LegacyAction::Noop as i32);
                 self.test_env
                     .run_machine_state_controller_iteration_until_state_matches(
                         &host_machine_id,
@@ -1174,16 +1200,31 @@ impl<'a> MockExploredHost<'a> {
     }
 }
 
-pub async fn register_expected_machine(env: &'_ TestEnv, config: &ManagedHostConfig) {
-    let Some(data) = config.expected_machine_data.as_ref() else {
+pub async fn register_expected_machine(
+    env: &'_ TestEnv,
+    config: &ManagedHostConfig,
+    default_dpf_enabled: Option<bool>,
+) {
+    // Tests may intentionally pre-create an expected-machine row; avoid inserting duplicates.
+    if db_expected_machine::find_by_bmc_mac_address(&env.pool, config.bmc_mac_address)
+        .await
+        .expect("Expect expected machine lookup by BMC MAC to succeed")
+        .is_some()
+    {
         return;
-    };
+    }
 
-    let mut data = data.clone();
+    // Always register an expected_machines entry so fixture-created hosts can flow
+    // through site-explorer ingestion. Site-explorer now enforces that only hosts listed
+    // in `expected_machines` are turned into Managed Hosts.
+    let mut data = config.expected_machine_data.clone().unwrap_or_default();
     // Fill data from ManagedHostConfig
     // TODO: Disambiguate chassis and product serial number
     // We seem to set the product serial number here
     data.serial_number = config.serial.clone();
+    if data.dpf_enabled.is_none() {
+        data.dpf_enabled = default_dpf_enabled;
+    }
 
     let em = ExpectedMachine {
         id: Some(uuid::Uuid::new_v4()),
@@ -1218,7 +1259,7 @@ pub async fn new_mock_host(
     }
 
     // Create an expected-machine record for the new machine
-    register_expected_machine(env, &config).await;
+    register_expected_machine(env, &config, None).await;
 
     // Set BMC credentials in vault
     for bmc_mac_address in vec![config.bmc_mac_address]
@@ -1323,6 +1364,7 @@ pub async fn new_host_with_machine_validation(
 ) -> eyre::Result<ManagedHostStateSnapshot> {
     let managed_host =
         ManagedHostConfig::with_dpus((0..dpu_count).map(|_| DpuConfig::default()).collect());
+    register_expected_machine(env, &managed_host, None).await;
     let mut mock_explored_host = MockExploredHost::new(env, managed_host);
 
     // Run BMC DHCP. DPUs first...
@@ -1388,6 +1430,7 @@ pub async fn new_host_with_machine_validation(
 }
 
 pub async fn new_dpu(env: &TestEnv, config: ManagedHostConfig) -> eyre::Result<MachineId> {
+    register_expected_machine(env, &config, None).await;
     let mut mock_explored_host = MockExploredHost::new(env, config);
 
     mock_explored_host = mock_explored_host
@@ -1422,6 +1465,7 @@ pub async fn new_dpu_in_network_install(
     env: &TestEnv,
     config: ManagedHostConfig,
 ) -> eyre::Result<TestManagedHost> {
+    register_expected_machine(env, &config, None).await;
     let mut mock_explored_host = MockExploredHost::new(env, config);
 
     mock_explored_host = mock_explored_host
@@ -1664,7 +1708,7 @@ pub async fn new_mock_host_with_dpf(
     }
 
     // Create an expected-machine record for the new machine
-    register_expected_machine(env, &config).await;
+    register_expected_machine(env, &config, Some(true)).await;
 
     // Set BMC credentials in vault
     for bmc_mac_address in vec![config.bmc_mac_address]

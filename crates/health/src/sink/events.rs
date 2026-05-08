@@ -59,11 +59,10 @@ impl EventContext {
         }
     }
 
-    pub fn switch_serial(&self) -> Option<&str> {
-        match &self.metadata {
-            Some(EndpointMetadata::Switch(switch)) => Some(switch.serial.as_str()),
-            _ => None,
-        }
+    pub fn serial_number(&self) -> Option<&str> {
+        self.metadata
+            .as_ref()
+            .and_then(EndpointMetadata::serial_number)
     }
 
     pub fn rack_id(&self) -> Option<&RackId> {
@@ -138,6 +137,7 @@ pub enum CollectorEvent {
     MetricCollectionStart,
     Metric(Box<SensorHealthData>),
     MetricCollectionEnd,
+    CollectorRemoved,
     Log(Box<LogRecord>),
     Firmware(FirmwareInfo),
     HealthReport(Arc<HealthReport>),
@@ -146,6 +146,7 @@ pub enum CollectorEvent {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ReportSource {
     BmcSensors,
+    BmcLeakDetectors,
     TrayLeakDetection,
     RackLeakDetection,
 }
@@ -154,6 +155,7 @@ impl ReportSource {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::BmcSensors => "bmc-sensors",
+            Self::BmcLeakDetectors => "bmc-leak-detectors",
             Self::TrayLeakDetection => "tray-leak-detection",
             Self::RackLeakDetection => "rack-leak-detection",
         }

@@ -69,7 +69,7 @@ endpoint = "http://localhost:4317"
 batch_size = 512
 flush_interval = "2s"
 
-[sinks.health_override]
+[sinks.health_report]
 root_ca = "/var/run/secrets/spiffe.io/ca.crt"
 client_cert = "/var/run/secrets/spiffe.io/tls.crt"
 client_key = "/var/run/secrets/spiffe.io/tls.key"
@@ -98,6 +98,10 @@ include_sensor_thresholds = true
 
 [collectors.firmware]
 firmware_refresh_interval = "30m"
+
+[collectors.leak_detector]
+poll_interval = "1m"
+state_refresh_interval = "30m"
 
 [collectors.logs]
 mode = "sse" # "sse" (default, preferred) or "periodic" (fallback)

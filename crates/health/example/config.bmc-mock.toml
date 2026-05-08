@@ -22,7 +22,7 @@ port = 1266
 mac = "aa:bb:cc:dd:ee:ff"
 username = "admin"
 password = "secret"
-rack_id = "RACK-1"
+rack_id = "RACK_1"
 
 [endpoint_sources.carbide_api]
 enabled = false
@@ -40,8 +40,8 @@ enabled = true
 [sinks.prometheus]
 enabled = true
 
-[sinks.health_override]
+[sinks.health_report]
 enabled = false
 
-[sinks.rack_health_override]
+[sinks.rack_health_report]
 enabled = false

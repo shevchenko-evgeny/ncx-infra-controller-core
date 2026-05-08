@@ -15,9 +15,9 @@
  * limitations under the License.
  */
 use std::backtrace::{Backtrace, BacktraceStatus};
-use std::net::IpAddr;
 
 use ::rpc::errors::RpcDataConversionError;
+use carbide_ib_fabric::errors::IbError;
 use carbide_redfish::libredfish::RedfishClientCreationError;
 use carbide_uuid::machine::MachineId;
 use config_version::ConfigVersionParseError;
@@ -29,7 +29,6 @@ use mac_address::MacAddress;
 use model::errors::ModelError;
 use model::hardware_info::HardwareInfoError;
 use model::network_devices::LldpError;
-use model::site_explorer::EndpointExplorationError;
 use model::tenant::TenantError;
 use model::{ConfigValidationError, resource_pool};
 use tonic::Status;
@@ -201,9 +200,6 @@ pub enum CarbideError {
     #[error("Attest Bind Key Error: {0}")]
     AttestBindKeyError(String),
 
-    #[error("Explored machine at {0} has no DPUs")]
-    NoDpusInMachine(IpAddr),
-
     #[error("{requested_ip} resolves to {found_mac} not {requested_mac}")]
     BmcMacIpMismatch {
         /// The BMC endpoint IP requested by the caller
@@ -216,13 +212,6 @@ pub enum CarbideError {
 
     #[error("{0}")]
     FailedPrecondition(String),
-
-    #[error("EndpointExplorationError for {action}: {err}")]
-    EndpointExplorationError {
-        action: &'static str,
-        /// The actual BMC MAC address found associated with the endpoint IP
-        err: EndpointExplorationError,
-    },
 
     #[error("Failed to map device to dpu: {0}")]
     DpuMappingError(String),
@@ -244,6 +233,9 @@ pub enum CarbideError {
 
     #[error("Permission denied: {0}")]
     PermissionDeniedError(String),
+
+    #[error("Attestation Error: {0}")]
+    AttestationError(String),
 }
 
 impl From<ModelError> for CarbideError {
@@ -299,6 +291,20 @@ impl From<DatabaseError> for CarbideError {
             DatabaseError::TryAgain => Internal {
                 message: DatabaseError::TryAgain.to_string(),
             },
+        }
+    }
+}
+
+impl From<IbError> for CarbideError {
+    fn from(e: IbError) -> Self {
+        match e {
+            IbError::DatabaseError(e) => e.into(),
+            IbError::ModelError(e) => e.into(),
+            IbError::IBFabricError(msg) => Self::IBFabricError(msg),
+            IbError::NotFoundError { kind, id } => Self::NotFoundError { kind, id },
+            IbError::InvalidArgument(e) => Self::InvalidArgument(e),
+            IbError::NotImplemented => Self::NotImplemented,
+            IbError::Internal { message } => Self::Internal { message },
         }
     }
 }

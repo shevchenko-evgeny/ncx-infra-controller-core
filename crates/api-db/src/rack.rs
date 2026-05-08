@@ -20,7 +20,7 @@ use config_version::ConfigVersion;
 use health_report::{HealthReport, HealthReportApplyMode};
 use model::controller_outcome::PersistentStateHandlerOutcome;
 use model::metadata::Metadata;
-use model::rack::{FirmwareUpgradeJob, Rack, RackConfig, RackState};
+use model::rack::{FirmwareUpgradeJob, NvosUpdateJob, Rack, RackConfig, RackState};
 use sqlx::PgConnection;
 
 use crate::db_read::DbReader;
@@ -57,15 +57,50 @@ where
 
 pub async fn find_ids(
     txn: impl DbReader<'_>,
-    _filter: model::rack::RackSearchFilter,
+    filter: model::rack::RackSearchFilter,
 ) -> Result<Vec<RackId>, DatabaseError> {
     let mut builder = sqlx::QueryBuilder::new("SELECT id FROM racks WHERE TRUE "); // The TRUE will be optimized away.
+
+    if let Some(label) = filter.label {
+        match (label.key.is_empty(), label.value) {
+            // Label key is empty, label value is set.
+            (true, Some(value)) => {
+                builder.push(
+                    " AND EXISTS (
+                        SELECT 1
+                        FROM jsonb_each_text(labels) AS kv
+                        WHERE kv.value = ",
+                );
+                builder.push_bind(value);
+                builder.push(")");
+            }
+            // Label key is empty, label value is not set.
+            (true, None) => {
+                return Err(DatabaseError::InvalidArgument(
+                    "finding racks based on label needs either key or a value.".to_string(),
+                ));
+            }
+            // Label key is not empty, label value is not set.
+            (false, None) => {
+                builder.push(" AND labels ->> ");
+                builder.push_bind(label.key);
+                builder.push(" IS NOT NULL");
+            }
+            // Label key is not empty, label value is set.
+            (false, Some(value)) => {
+                builder.push(" AND labels ->> ");
+                builder.push_bind(label.key);
+                builder.push(" = ");
+                builder.push_bind(value);
+            }
+        }
+    }
 
     let query = builder.build_query_as();
     query
         .fetch_all(txn)
         .await
-        .map_err(|e| DatabaseError::new("instance::find_ids", e))
+        .map_err(|e| DatabaseError::new("rack::find_ids", e))
 }
 
 pub async fn create(
@@ -183,6 +218,21 @@ pub async fn update_firmware_upgrade_job(
     Ok(())
 }
 
+pub async fn update_nvos_update_job(
+    txn: &mut PgConnection,
+    rack_id: &RackId,
+    job: Option<&NvosUpdateJob>,
+) -> DatabaseResult<()> {
+    let query = "UPDATE racks SET nvos_update_job = $1, updated = NOW() WHERE id = $2 RETURNING id";
+    sqlx::query_as::<_, (RackId,)>(query)
+        .bind(job.map(sqlx::types::Json))
+        .bind(rack_id)
+        .fetch_one(txn)
+        .await
+        .map_err(|e| DatabaseError::new("update_nvos_update_job", e))?;
+    Ok(())
+}
+
 pub async fn final_delete(txn: &mut PgConnection, rack_id: &RackId) -> DatabaseResult<()> {
     let query = "DELETE from racks WHERE id=$1";
     sqlx::query(query)
@@ -194,7 +244,7 @@ pub async fn final_delete(txn: &mut PgConnection, rack_id: &RackId) -> DatabaseR
     Ok(())
 }
 
-pub async fn insert_health_report_override(
+pub async fn insert_health_report(
     txn: &mut PgConnection,
     rack_id: &RackId,
     mode: HealthReportApplyMode,
@@ -203,7 +253,7 @@ pub async fn insert_health_report_override(
     crate::health_report::insert_health_report(txn, "racks", rack_id, mode, health_report).await
 }
 
-pub async fn remove_health_report_override(
+pub async fn remove_health_report(
     txn: &mut PgConnection,
     rack_id: &RackId,
     mode: HealthReportApplyMode,

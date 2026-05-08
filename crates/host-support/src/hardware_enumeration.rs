@@ -23,16 +23,16 @@ use std::path::Path;
 use std::process::Command;
 use std::str::Utf8Error;
 
+use ::carbide_utils::arch::{CpuArchitecture, UnsupportedCpuArchitecture};
+use ::carbide_utils::cmd::CmdError;
 use ::rpc::machine_discovery as rpc_discovery;
-use ::utils::cmd::CmdError;
-use ::utils::models::arch::{CpuArchitecture, UnsupportedCpuArchitecture};
 use base64::prelude::*;
+use carbide_utils::{BF2_PRODUCT_NAME, BF3_PRODUCT_NAME};
 use libudev::Device;
 use procfs::{CpuInfo, FromRead};
 use rpc::machine_discovery::MemoryDevice;
 use tracing::warn;
 use uname::uname;
-use utils::{BF2_PRODUCT_NAME, BF3_PRODUCT_NAME};
 
 use crate::cpu::aggregate_cpus;
 
@@ -374,11 +374,12 @@ fn get_cpu_info(
 }
 
 pub fn enumerate_hardware() -> Result<rpc_discovery::DiscoveryInfo, HardwareEnumerationError> {
-    enumerate_hardware_inner("/proc/cpuinfo")
+    enumerate_hardware_inner("/proc/cpuinfo", "/proc/meminfo")
 }
 
 fn enumerate_hardware_inner(
     cpu_info_path: &str,
+    mem_info_path: &str,
 ) -> Result<rpc_discovery::DiscoveryInfo, HardwareEnumerationError> {
     let context = libudev::Context::new()?;
 
@@ -727,8 +728,9 @@ fn enumerate_hardware_inner(
             // Figure out a longer term strategy to use all three serial numbers. Keeping the commented out code below for future reference.
             // Possible Values for dmi.product_name: BlueField SoC (BF2), BlueField-3 SmartNIC Main Card (BF3), BlueField-3 DPU (BF3)
             if dmi.product_name.contains(BF_PRODUCT_NAME_REGEX) {
-                dmi.board_serial = utils::DEFAULT_DPU_DMI_BOARD_SERIAL_NUMBER.to_string();
-                dmi.chassis_serial = utils::DEFAULT_DPU_DMI_CHASSIS_SERIAL_NUMBER.to_string();
+                dmi.board_serial = carbide_utils::DEFAULT_DPU_DMI_BOARD_SERIAL_NUMBER.to_string();
+                dmi.chassis_serial =
+                    carbide_utils::DEFAULT_DPU_DMI_CHASSIS_SERIAL_NUMBER.to_string();
             } else {
                 dmi.board_serial = convert_sysattr_to_string("board_serial", &device)?.to_string();
                 dmi.chassis_serial =
@@ -810,23 +812,13 @@ fn enumerate_hardware_inner(
             }
         }
         Err(err) => {
-            warn!("Could not discover host memory using smbios device, using /proc/meminfo: {err}");
-            let mut mem = 0u32;
-            let meminfo = std::fs::read_to_string("/proc/meminfo").map_err(|e| {
-                HardwareEnumerationError::GenericError(format!("Err reading /proc/meminfo: {e}"))
+            warn!(
+                "Could not discover host memory using smbios device, using {mem_info_path}: {err}"
+            );
+            let meminfo = std::fs::read_to_string(mem_info_path).map_err(|e| {
+                HardwareEnumerationError::GenericError(format!("Err reading {mem_info_path}: {e}"))
             })?;
-            for line in meminfo.lines() {
-                // line is "MemTotal:       32572708 kB"
-                if line.starts_with("MemTotal:") {
-                    mem = line
-                        .split_ascii_whitespace()
-                        .nth(1)
-                        .unwrap_or("0")
-                        .parse()
-                        .unwrap_or_default();
-                    break;
-                }
-            }
+            let mem = parse_memtotal_kb(&meminfo);
 
             memory_devices.push(MemoryDevice {
                 size_mb: Some(mem / 1024),
@@ -858,7 +850,7 @@ fn enumerate_hardware_inner(
         nvme_devices: nvmes,
         dmi_data: Some(dmi),
         machine_type: arch.to_string(),
-        machine_arch: Some(arch.into()),
+        machine_arch: Some(rpc::utils::cpu_architecture_to_rpc(arch)),
         tpm_ek_certificate,
         dpu_info: dpu_vpd,
         gpus,
@@ -873,6 +865,26 @@ fn enumerate_hardware_inner(
 /// Path where the host's `/proc/cpuinfo` is bind-mounted inside the init container.
 const INIT_CPU_INFO_PATH: &str = "/host-cpu-info";
 
+/// Path where the host's `/proc/meminfo` is bind-mounted inside the init container.
+const INIT_MEM_INFO_PATH: &str = "/host-mem-info";
+
+/// Validate that an enumerated [`rpc_discovery::DiscoveryInfo`] is complete
+/// enough for downstream use. Returns `Err` describing the missing piece so
+/// the caller can retry the probe.
+///
+/// Today the only required field is `dpu_info` — DPU VPD probing can race
+/// with device init and produce a `None` if read too early.
+fn validate_enumerated(
+    info: &rpc_discovery::DiscoveryInfo,
+) -> Result<(), HardwareEnumerationError> {
+    if info.dpu_info.is_none() {
+        return Err(HardwareEnumerationError::GenericError(
+            "Hardware enumeration is missing dpu_info".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Enumerate hardware and save the result as JSON to [`HW_CACHE_PATH`].
 ///
 /// Used by the init container to snapshot host hardware info so the containerized agent can
@@ -880,11 +892,49 @@ const INIT_CPU_INFO_PATH: &str = "/host-cpu-info";
 ///
 /// Reads CPU info from [`INIT_CPU_INFO_PATH`] (`/host-cpu-info`) where the init container
 /// bind-mounts the host's `/proc/cpuinfo`.
-pub fn enumerate_and_save_hardware()
+pub async fn enumerate_and_save_hardware()
 -> Result<rpc_discovery::DiscoveryInfo, HardwareEnumerationError> {
-    let info = enumerate_hardware_inner(INIT_CPU_INFO_PATH)?;
-    save_hardware_to(&info, HW_CACHE_PATH)?;
-    Ok(info)
+    let mut last_err = String::new();
+
+    macro_rules! try_or_retry {
+        ($expr:expr, $msg:literal, $attempt:expr) => {
+            match $expr {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(attempt = $attempt, error = %e, $msg);
+                    last_err = e.to_string();
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    continue;
+                }
+            }
+        };
+    }
+
+    for attempt in 1..10 {
+        let info = try_or_retry!(
+            enumerate_hardware_inner(INIT_CPU_INFO_PATH, INIT_MEM_INFO_PATH),
+            "Hardware enumeration failed; retrying in 10s",
+            attempt
+        );
+        try_or_retry!(
+            validate_enumerated(&info),
+            "Hardware enumeration incomplete; retrying in 10s",
+            attempt
+        );
+        try_or_retry!(
+            save_hardware_to(&info, HW_CACHE_PATH),
+            "Failed to save hardware cache; retrying in 10s",
+            attempt
+        );
+        return Ok(info);
+    }
+
+    tracing::error!(
+        last_error = %last_err,
+        "Init container failed to generate hardware info. Try to delete the pod to recover."
+    );
+
+    Err(HardwareEnumerationError::GenericError(last_err))
 }
 
 /// Load the hardware snapshot from [`HW_CACHE_PATH`] written by the init container.
@@ -921,6 +971,23 @@ fn load_hardware_from(
             "Failed to parse hardware cache from {path}: {e}"
         ))
     })
+}
+
+/// Parse `MemTotal` from `/proc/meminfo` content, returning the value in kB.
+/// Returns 0 if the line is absent or unparseable.
+fn parse_memtotal_kb(meminfo: &str) -> u32 {
+    for line in meminfo.lines() {
+        // line format: "MemTotal:       32572708 kB"
+        if line.starts_with("MemTotal:") {
+            return line
+                .split_ascii_whitespace()
+                .nth(1)
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or_default();
+        }
+    }
+    0
 }
 
 #[cfg(test)]
@@ -992,5 +1059,66 @@ mod tests {
         assert_eq!(loaded.block_devices.len(), 1);
         assert_eq!(loaded.block_devices[0].model, "test-disk");
         assert_eq!(loaded.block_devices[0].serial, "SN123");
+    }
+
+    #[test]
+    fn test_init_container_paths_match_daemonset_mounts() {
+        assert_eq!(INIT_CPU_INFO_PATH, "/host-cpu-info");
+        assert_eq!(INIT_MEM_INFO_PATH, "/host-mem-info");
+        assert_eq!(HW_CACHE_PATH, "/data/hw_output.json");
+    }
+
+    #[test]
+    fn test_parse_memtotal_kb_typical() {
+        let meminfo = "MemTotal:       32572708 kB\nMemFree:        16000000 kB\n";
+        assert_eq!(parse_memtotal_kb(meminfo), 32572708);
+    }
+
+    #[test]
+    fn test_parse_memtotal_kb_missing_returns_zero() {
+        let meminfo = "MemFree:        16000000 kB\nSwapTotal:      0 kB\n";
+        assert_eq!(parse_memtotal_kb(meminfo), 0);
+    }
+
+    #[test]
+    fn test_parse_memtotal_kb_empty_returns_zero() {
+        assert_eq!(parse_memtotal_kb(""), 0);
+    }
+
+    #[test]
+    fn test_parse_memtotal_kb_malformed_value_returns_zero() {
+        let meminfo = "MemTotal:       not_a_number kB\n";
+        assert_eq!(parse_memtotal_kb(meminfo), 0);
+    }
+
+    #[test]
+    fn test_parse_memtotal_kb_realistic_meminfo() {
+        let meminfo = "\
+HugePages_Total: 0
+MemTotal:        8192000 kB
+MemFree:         4096000 kB
+Buffers:          512000 kB
+";
+        assert_eq!(parse_memtotal_kb(meminfo), 8192000);
+    }
+
+    #[test]
+    fn test_enumerate_and_save_writes_readable_cache() {
+        use std::fs;
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let cache_path = tmp_dir.path().join("hw_output.json");
+        let cache_path_str = cache_path.to_str().unwrap();
+
+        let info = minimal_discovery_info();
+        save_hardware_to(&info, cache_path_str).unwrap();
+
+        let loaded = load_hardware_from(cache_path_str).unwrap();
+        assert_eq!(loaded.machine_type, info.machine_type);
+
+        let raw = fs::read_to_string(cache_path_str).unwrap();
+        assert!(
+            raw.contains("machine_type"),
+            "cache should be JSON with known field"
+        );
     }
 }

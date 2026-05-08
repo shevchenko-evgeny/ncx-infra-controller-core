@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use carbide_redfish::libredfish::RedfishClientPool;
+use carbide_redfish::libredfish::conv::machine_last_reboot_requested_mode;
 use chrono::Utc;
 use libredfish::model::BootProgress;
 use libredfish::{PowerState, Redfish, RedfishError, SystemPowerControl};
@@ -67,7 +68,7 @@ pub async fn host_power_control_with_location(
     ctx.pending_db_writes
         .push(MachineWriteOp::UpdateRebootRequestedTime {
             machine_id: machine.id,
-            mode: action.into(),
+            mode: machine_last_reboot_requested_mode(action),
             time: Utc::now(),
         });
 
@@ -100,6 +101,26 @@ pub async fn host_power_control_with_location(
                     .map_err(CarbideError::RedfishError)?
             }
         }
+    } else if action == SystemPowerControl::ACPowercycle {
+        let power_state = redfish_client
+            .get_power_state()
+            .await
+            .map_err(CarbideError::RedfishError)?;
+        if power_state != PowerState::Off {
+            tracing::warn!(
+                machine_id = machine.id.to_string(),
+                %power_state,
+                "ACPowercycle requires chassis to be Off, forcing off first"
+            );
+            redfish_client
+                .power(SystemPowerControl::ForceOff)
+                .await
+                .map_err(CarbideError::RedfishError)?;
+        }
+        redfish_client
+            .power(action)
+            .await
+            .map_err(CarbideError::RedfishError)?
     } else {
         redfish_client
             .power(action)

@@ -14,12 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 pub(crate) mod common;
 mod compute_allocation;
 mod connected_device;
 mod create_domain;
 mod credential;
-mod desired_firmware_versions;
 mod dhcp_lease_expiration;
 mod dns;
 mod dpa_interfaces;
@@ -104,10 +104,10 @@ mod redfish_actions;
 mod resource_pool;
 mod route_servers;
 mod service_health_metrics;
+mod set_primary_dpu;
 mod site_explorer;
 mod sku;
 mod spdm;
-mod state_controller;
 mod static_address_management;
 mod storage;
 mod switch;
@@ -117,7 +117,6 @@ mod switch_metadata;
 mod switch_state_controller;
 mod tenant_keyset_find;
 mod tenants;
-mod test_meter;
 mod tpm_ca;
 mod vpc;
 mod vpc_find;

@@ -19,7 +19,7 @@ pub mod metrics;
 
 use std::panic::Location;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub use ::rpc::forge as rpc;
 use ::rpc::forge::{RemoveSkuRequest, SkuIdList};
@@ -30,7 +30,10 @@ use ::rpc::protos::dns::{
     UpdateDomainRequest,
 };
 use ::rpc::protos::{measured_boot as measured_boot_pb, mlx_device as mlx_device_pb};
+use carbide_ib_fabric::ib::IBFabricManager;
+use carbide_nvlink_manager::nvlink::NmxmClientPool;
 use carbide_redfish::libredfish::RedfishClientPool;
+use carbide_site_explorer::EndpointExplorer;
 use carbide_uuid::machine::{MachineId, MachineInterfaceId};
 use db::db_read::PgPoolReader;
 use db::work_lock_manager::WorkLockManagerHandle;
@@ -41,7 +44,7 @@ use librms::RmsApi;
 use model::machine::Machine;
 use model::machine::machine_search_config::MachineSearchConfig;
 use model::resource_pool::common::CommonPools;
-use sqlx::{PgPool, PgTransaction};
+use sqlx::PgTransaction;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -51,11 +54,9 @@ use crate::cfg::file::CarbideConfig;
 use crate::dpf::DpfOperations;
 use crate::dynamic_settings::DynamicSettings;
 use crate::ethernet_virtualization::EthVirtData;
-use crate::ib::IBFabricManager;
 use crate::logging::log_limiter::LogLimiter;
-use crate::nvlink::NmxmClientPool;
+use crate::rack::bms_client::BmsDsxExchangeHandle;
 use crate::scout_stream::ConnectionRegistry;
-use crate::site_explorer::EndpointExplorer;
 use crate::state_controller::controller::Enqueuer;
 use crate::state_controller::machine::io::MachineStateControllerIO;
 use crate::{CarbideError, CarbideResult};
@@ -81,6 +82,7 @@ pub struct Api {
     pub(crate) machine_state_handler_enqueuer: Enqueuer<MachineStateControllerIO>,
     pub(crate) metric_emitter: ApiMetricsEmitter,
     pub(crate) component_manager: Option<component_manager::component_manager::ComponentManager>,
+    pub(crate) bms_client: OnceLock<Arc<BmsDsxExchangeHandle>>,
 }
 
 pub(crate) type ScoutStreamType =
@@ -497,46 +499,71 @@ impl Forge for Api {
         crate::handlers::dpu::record_dpu_network_status(self, request).await
     }
 
+    async fn list_machine_health_reports(
+        &self,
+        request: Request<MachineId>,
+    ) -> Result<Response<rpc::ListHealthReportResponse>, Status> {
+        crate::handlers::health::list_machine_health_reports(self, request).await
+    }
+
+    async fn insert_machine_health_report(
+        &self,
+        request: Request<rpc::InsertMachineHealthReportRequest>,
+    ) -> Result<Response<()>, Status> {
+        crate::handlers::health::insert_machine_health_report(self, request).await
+    }
+
+    async fn remove_machine_health_report(
+        &self,
+        request: Request<rpc::RemoveMachineHealthReportRequest>,
+    ) -> Result<Response<()>, Status> {
+        crate::handlers::health::remove_machine_health_report(self, request).await
+    }
+
+    async fn list_rack_health_reports(
+        &self,
+        request: Request<rpc::ListRackHealthReportsRequest>,
+    ) -> Result<Response<rpc::ListHealthReportResponse>, Status> {
+        crate::handlers::rack::list_rack_health_reports(self, request).await
+    }
+
+    async fn insert_rack_health_report(
+        &self,
+        request: Request<rpc::InsertRackHealthReportRequest>,
+    ) -> Result<Response<()>, Status> {
+        crate::handlers::rack::insert_rack_health_report(self, request).await
+    }
+
+    async fn remove_rack_health_report(
+        &self,
+        request: Request<rpc::RemoveRackHealthReportRequest>,
+    ) -> Result<Response<()>, Status> {
+        crate::handlers::rack::remove_rack_health_report(self, request).await
+    }
+
+    // Deprecated aliases. Delegate to the canonical handlers above.
+    #[allow(deprecated)]
     async fn list_health_report_overrides(
         &self,
         request: Request<MachineId>,
     ) -> Result<Response<rpc::ListHealthReportResponse>, Status> {
-        crate::handlers::health::list_health_report_overrides(self, request).await
+        self.list_machine_health_reports(request).await
     }
 
+    #[allow(deprecated)]
     async fn insert_health_report_override(
         &self,
-        request: Request<rpc::InsertHealthReportOverrideRequest>,
+        request: Request<rpc::InsertMachineHealthReportRequest>,
     ) -> Result<Response<()>, Status> {
-        crate::handlers::health::insert_health_report_override(self, request).await
+        self.insert_machine_health_report(request).await
     }
 
+    #[allow(deprecated)]
     async fn remove_health_report_override(
         &self,
-        request: Request<rpc::RemoveHealthReportOverrideRequest>,
+        request: Request<rpc::RemoveMachineHealthReportRequest>,
     ) -> Result<Response<()>, Status> {
-        crate::handlers::health::remove_health_report_override(self, request).await
-    }
-
-    async fn list_rack_health_report_overrides(
-        &self,
-        request: Request<rpc::ListRackHealthReportOverridesRequest>,
-    ) -> Result<Response<rpc::ListHealthReportResponse>, Status> {
-        crate::handlers::rack::list_rack_health_report_overrides(self, request).await
-    }
-
-    async fn insert_rack_health_report_override(
-        &self,
-        request: Request<rpc::InsertRackHealthReportOverrideRequest>,
-    ) -> Result<Response<()>, Status> {
-        crate::handlers::rack::insert_rack_health_report_override(self, request).await
-    }
-
-    async fn remove_rack_health_report_override(
-        &self,
-        request: Request<rpc::RemoveRackHealthReportOverrideRequest>,
-    ) -> Result<Response<()>, Status> {
-        crate::handlers::rack::remove_rack_health_report_override(self, request).await
+        self.remove_machine_health_report(request).await
     }
 
     async fn list_switch_health_reports(
@@ -1439,6 +1466,13 @@ impl Forge for Api {
         crate::handlers::expected_machine::get_linked(self, request).await
     }
 
+    async fn get_all_unexpected_machines(
+        &self,
+        request: Request<()>,
+    ) -> Result<Response<rpc::UnexpectedMachineList>, Status> {
+        crate::handlers::expected_machine::get_all_unexpected_machines(self, request).await
+    }
+
     async fn delete_all_expected_machines(
         &self,
         request: Request<()>,
@@ -2200,6 +2234,13 @@ impl Forge for Api {
         crate::handlers::machine_validation::on_demand_machine_validation(self, request).await
     }
 
+    async fn on_demand_rack_maintenance(
+        &self,
+        request: Request<rpc::RackMaintenanceOnDemandRequest>,
+    ) -> Result<Response<rpc::RackMaintenanceOnDemandResponse>, Status> {
+        crate::handlers::rack::on_demand_rack_maintenance(self, request).await
+    }
+
     async fn tpm_add_ca_cert(
         &self,
         request: Request<rpc::TpmCaCert>,
@@ -2880,30 +2921,37 @@ impl Forge for Api {
 
     async fn trigger_machine_attestation(
         &self,
-        request: tonic::Request<rpc::AttestationData>,
-    ) -> Result<tonic::Response<()>, Status> {
+        request: tonic::Request<rpc::SpdmMachineAttestationTriggerRequest>,
+    ) -> Result<tonic::Response<rpc::SpdmMachineAttestationTriggerResponse>, Status> {
         crate::handlers::attestation::trigger_machine_attestation(self, request).await
     }
 
     async fn cancel_machine_attestation(
         &self,
-        request: tonic::Request<rpc::AttestationData>,
+        request: tonic::Request<MachineId>,
     ) -> Result<tonic::Response<()>, Status> {
         crate::handlers::attestation::cancel_machine_attestation(self, request).await
     }
 
-    async fn find_machines_under_attestation(
+    async fn list_attestations_for_machine_id(
         &self,
-        request: tonic::Request<rpc::AttestationMachineList>,
-    ) -> Result<tonic::Response<rpc::AttestationResponse>, Status> {
-        crate::handlers::attestation::list_machines_under_attestation(self, request).await
+        request: tonic::Request<MachineId>,
+    ) -> Result<tonic::Response<rpc::SpdmListAttestationsResponse>, Status> {
+        crate::handlers::attestation::list_attestations_for_machine_id(self, request).await
     }
 
     async fn find_machine_ids_under_attestation(
         &self,
-        request: tonic::Request<rpc::AttestationIdsRequest>,
+        request: tonic::Request<()>,
     ) -> Result<Response<::rpc::common::MachineIdList>, Status> {
         crate::handlers::attestation::list_machine_ids_under_attestation(self, request).await
+    }
+
+    async fn get_machine_attestation_status(
+        &self,
+        request: tonic::Request<MachineId>,
+    ) -> Result<Response<rpc::SpdmMachineAttestationStatusResponse>, Status> {
+        crate::handlers::attestation::get_machine_attestations_status(self, request).await
     }
 
     async fn sign_machine_identity(
@@ -3292,7 +3340,7 @@ pub(crate) fn log_request_data_redacted(s: impl AsRef<str>) {
 
 /// Logs the Machine ID in the current tracing span
 pub(crate) fn log_machine_id(machine_id: &MachineId) {
-    tracing::Span::current().record("forge.machine_id", machine_id.to_string());
+    tracing::Span::current().record("forge.machine_id", tracing::field::display(machine_id));
 }
 
 pub(crate) fn log_tenant_organization_id(organization_id: &str) {
@@ -3310,19 +3358,6 @@ pub(crate) fn truncate(mut s: String, len: usize) -> String {
     s
 }
 
-pub trait TransactionVending {
-    fn txn_begin(&self) -> impl Future<Output = Result<db::Transaction<'_>, DatabaseError>>;
-}
-
-impl TransactionVending for PgPool {
-    #[track_caller]
-    // This returns an `impl Future` instead of being async, so that we can use #[track_caller],
-    // which is unsupported with async fn's.
-    fn txn_begin(&self) -> impl Future<Output = Result<db::Transaction<'_>, DatabaseError>> {
-        db::Transaction::begin(self)
-    }
-}
-
 impl Api {
     // This function can just async when
     // https://github.com/rust-lang/rust/issues/110011 will be
@@ -3335,6 +3370,10 @@ impl Api {
 
     pub fn db_reader(&self) -> PgPoolReader {
         self.database_connection.clone().into()
+    }
+
+    pub fn pg_pool(&self) -> &sqlx::PgPool {
+        &self.database_connection
     }
 
     // This function can just async when
