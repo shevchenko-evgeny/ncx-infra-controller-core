@@ -42,6 +42,7 @@ pub struct Config {
     pub need_oem_ami_config_bmc: bool,
 }
 
+#[allow(dead_code)]
 pub struct ExploredManager<B: Bmc> {
     pub manager: Manager<B>,
     pub eth_interfaces: Vec<EthernetInterface<B>>,

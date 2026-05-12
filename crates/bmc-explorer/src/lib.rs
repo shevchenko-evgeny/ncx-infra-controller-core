@@ -194,10 +194,16 @@ pub async fn nv_generate_exploration_report<B: Bmc>(
         })
         .await?;
 
-    let lockdown_status = hw_type
-        .map(|hw_type| lockdown_status(&hw_type, &explored_system, &explored_manager))
-        .transpose()?
-        .and_then(identity);
+    //let lockdown_status = hw_type
+    //    .map(|hw_type| lockdown_status(&hw_type, &explored_system, &explored_manager))
+    //    .transpose()?
+    //    .and_then(identity);
+
+    //TODO: REMOVE IT
+    let lockdown_status = Some(LockdownStatus {
+        status: InternalLockdownStatus::Enabled,
+        message: "dummy_message".into(),
+    });
 
     let secure_boot_status = explored_system
         .secure_boot_status()
@@ -290,6 +296,7 @@ pub(crate) fn hw_type<B: Bmc>(
         })
 }
 
+#[allow(dead_code)]
 fn lockdown_status<B: Bmc>(
     hw_type: &hw::HwType,
     explored_system: &ExploredComputerSystem<B>,
