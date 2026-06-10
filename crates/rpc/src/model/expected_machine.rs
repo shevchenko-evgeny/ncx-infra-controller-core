@@ -284,6 +284,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn expected_host_nic_rejects_invalid_mac_address() {
+        let err = ExpectedHostNic::try_from(rpc::forge::ExpectedHostNic {
+            mac_address: "not-a-mac".into(),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(
+            matches!(err, RpcDataConversionError::InvalidMacAddress(mac) if mac == "not-a-mac")
+        );
+    }
+
+    #[test]
+    fn expected_machine_data_rejects_invalid_host_nic_mac_address() {
+        let mut rpc_machine = make_rpc_expected_machine(None);
+        rpc_machine.host_nics.push(rpc::forge::ExpectedHostNic {
+            mac_address: "not-a-mac".into(),
+            ..Default::default()
+        });
+
+        let Err(err) = ExpectedMachineData::try_from(rpc_machine) else {
+            panic!("expected invalid host NIC MAC address");
+        };
+
+        assert!(
+            matches!(err, RpcDataConversionError::InvalidMacAddress(mac) if mac == "not-a-mac")
+        );
+    }
+
     fn make_rpc_expected_machine(disable_lockdown: Option<bool>) -> rpc::forge::ExpectedMachine {
         rpc::forge::ExpectedMachine {
             bmc_mac_address: "AA:BB:CC:DD:EE:FF".into(),
