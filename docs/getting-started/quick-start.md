@@ -31,6 +31,20 @@ The cluster must have:
 - DNS resolution working (`kubernetes.default.svc.cluster.local` resolves on every node).
 - Network connectivity to your container registry.
 
+### Site controller node DPU requirements
+
+If your site controller nodes are equipped with DPUs (BlueField NICs), the DPUs must be fully provisioned and configured **before** the Kubernetes cluster is set up. NICo does not provision the site controller nodes' own DPUs — it only manages DPUs on downstream bare-metal hosts after ingestion.
+
+Specifically, you must complete the following before proceeding:
+
+- Flash the DPU firmware to a supported version using the BlueField Firmware Bundle.
+- Configure the DPU operating mode (DPU mode or NIC mode) to match your site controller networking topology. See the [network prerequisites](prerequisites/network.md) for the supported topologies.
+- Ensure the DPU ARM OS is booted and reachable via its management interface.
+
+Refer to the NVIDIA DOCA documentation and the BlueField Firmware Bundle download archive for firmware flashing instructions and supported firmware versions:
+
+[https://developer.nvidia.com/doca-2-9-2-lts-ovs-doca-download-archive?deployment_platform=BlueField&deployment_package=BF-FW-Bundle](https://developer.nvidia.com/doca-2-9-2-lts-ovs-doca-download-archive?deployment_platform=BlueField&deployment_package=BF-FW-Bundle)
+
 ### Required tools (local machine)
 
 The following tools must be installed on the machine that you will use to run `setup.sh`--not on the Kubernetes cluster itself.
