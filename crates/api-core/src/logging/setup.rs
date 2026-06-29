@@ -228,6 +228,12 @@ pub fn create_metrics() -> eyre::Result<Metrics> {
         .with_view(create_metric_view_for_retry_histograms("*_attempts_*")?)
         .with_view(create_metric_view_for_retry_histograms("*_retries_*")?)
         .with_view(ApiMetricsEmitter::machine_reboot_duration_view()?)
+        .with_view(carbide_site_explorer::site_explorer_latency_histogram_view(
+            "carbide_site_explorer_*_latency",
+        )?)
+        .with_view(carbide_site_explorer::site_explorer_latency_histogram_view(
+            "carbide_endpoint_exploration_duration",
+        )?)
         .build();
     // After this call `global::meter()` will be available
     opentelemetry::global::set_meter_provider(meter_provider.clone());
@@ -611,6 +617,18 @@ mod tests {
             .with_view(create_metric_view_for_retry_histograms("*_attempts_*").unwrap())
             .with_view(create_metric_view_for_retry_histograms("*_retries_*").unwrap())
             .with_view(ApiMetricsEmitter::machine_reboot_duration_view().unwrap())
+            .with_view(
+                carbide_site_explorer::site_explorer_latency_histogram_view(
+                    "carbide_site_explorer_*_latency",
+                )
+                .unwrap(),
+            )
+            .with_view(
+                carbide_site_explorer::site_explorer_latency_histogram_view(
+                    "carbide_endpoint_exploration_duration",
+                )
+                .unwrap(),
+            )
             .build();
 
         let state = KeyValue::new("state", "mystate");
