@@ -17,4 +17,20 @@
 
 mod connected_device;
 mod dhcp_lease_expiration;
+mod dpu_machine_inventory;
+mod explored_managed_host_find;
+mod explored_mlx_devices;
 mod find_by_ids_guards;
+mod ib_fabric_find;
+mod machine_bmc_metadata;
+mod machine_boot_interfaces;
+mod network_device;
+mod nvlink_domain_health;
+mod power_shelf_find;
+mod rack_find;
+mod route_servers;
+mod static_address_management;
+mod storage;
+mod switch_find;
+mod tenant_keyset_find;
+mod vpc_find;
