@@ -194,6 +194,12 @@ verification expectations.
 - API-layer enum-like request constants exposed through JSON use CapitalCase
   values, for example `SiteWideRoot` and `BMCRoot`.
 
+### REST endpoints through the Core gRPC proxy
+
+When building or converting a REST endpoint that calls on-site NICo Core through
+the generic gRPC proxy, follow
+[`skills/rest-core-grpc-proxy/SKILL.md`](skills/rest-core-grpc-proxy/SKILL.md).
+
 ### Prefer range-based iteration over C-style `for` loops
 
 The module is on Go 1.26.4, so reach for range-based iteration before the
